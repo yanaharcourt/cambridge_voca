@@ -163,9 +163,13 @@ class CambridgeVocabulary {
                 
                 // Фильтруем слова
                 this.filterWordsByStatus();
-                
+
+                // Пересчитываем числа в категориях под текущую вкладку
+                this.updateCategoryVisibility();
+
                 // Обновляем статистику
                 this.updateStatistics();
+
             });
         });
     }
@@ -819,24 +823,39 @@ updateSwitcherBadges() {
 
     // Обновление видимости категорий
     updateCategoryVisibility() {
-        const categoryHeaders = document.querySelectorAll('.category-header');
-        
-        categoryHeaders.forEach(header => {
-            const categorySection = header.parentElement;
-            const visibleWords = categorySection.querySelectorAll('.word-card[style*="block"], .word-card:not([style*="none"])');
-            const countElement = header.querySelector('.category-count');
-            
-            if (countElement) {
-                countElement.textContent = visibleWords.length;
-            }
-            
-            if (visibleWords.length === 0) {
-                categorySection.style.display = 'none';
+    const categoryHeaders = document.querySelectorAll('.category-header');
+
+    categoryHeaders.forEach(header => {
+        const categorySection = header.parentElement;
+        const countElement = header.querySelector('.category-count');
+
+        // Берём все карточки внутри конкретной категории
+        const cards = categorySection.querySelectorAll('.word-card[data-word]');
+
+        // Счёт по активной вкладке
+        let count = 0;
+        cards.forEach(card => {
+            const isLearned = this.isWordLearned(card.dataset.word);
+
+            if (this.currentFilter === 'learned') {
+                if (isLearned) count++;
+            } else if (this.currentFilter === 'studying') {
+                if (!isLearned) count++;
             } else {
-                categorySection.style.display = 'block';
+                // Fallback: если по какой-то причине фильтр не задан — считаем реально отображаемые
+                if (card.style.display !== 'none') count++;
             }
         });
-    },
+
+        if (countElement) {
+            countElement.textContent = count;
+        }
+
+        // Показываем/скрываем целиком секцию категории, исходя из количества
+        categorySection.style.display = count === 0 ? 'none' : 'block';
+    });
+}
+,
 
     // Подсчет видимых слов
     updateVisibleWordsCount() {
@@ -1005,6 +1024,8 @@ class WordTraining {
         this.currentModeIndex = 0;
         this.trainingModes = {
             flashcards: true,
+            memory: true,
+            fillblanks: true,
             translation: true,
             matching: true,
             spelling: true
@@ -1235,11 +1256,27 @@ class WordTraining {
                         </div>
                     </div>
 
+                    <div class="mode-item" data-mode="memory">
+                        <input type="checkbox" ${this.trainingModes.memory ? 'checked' : ''} class="mode-checkbox">
+                        <div>
+                            <h3 style="color: var(--card-text-primary); margin: 0 0 4px 0;">Memory Game</h3>
+                            <p style="color: var(--card-text-tertiary); margin: 0; font-size: 14px;">Найди пары слово-перевод</p>
+                        </div>
+                    </div>
+
                     <div class="mode-item" data-mode="translation">
                         <input type="checkbox" ${this.trainingModes.translation ? 'checked' : ''} class="mode-checkbox">
                         <div>
                             <h3 style="color: var(--card-text-primary); margin: 0 0 4px 0;">Проверка перевода</h3>
                             <p style="color: var(--card-text-tertiary); margin: 0; font-size: 14px;">Определение значения слова</p>
+                        </div>
+                    </div>
+
+                    <div class="mode-item" data-mode="fillblanks">
+                        <input type="checkbox" ${this.trainingModes.fillblanks ? 'checked' : ''} class="mode-checkbox">
+                        <div>
+                            <h3 style="color: var(--card-text-primary); margin: 0 0 4px 0;">Fill in the Blanks</h3>
+                            <p style="color: var(--card-text-tertiary); margin: 0; font-size: 14px;">Заполни пропуски в предложениях</p>
                         </div>
                     </div>
 
@@ -1351,7 +1388,7 @@ class WordTraining {
             modal.remove();
         });
     }
-
+    
     // Получение выбранных слов для тренировки
     getSelectedWords() {
         console.log('📚 Getting selected words...');
@@ -1364,10 +1401,25 @@ class WordTraining {
         const selectedWordsArray = Array.from(window.cambridgeApp.selectedWords);
         const wordsForTraining = window.cambridgeApp.words.filter(word => 
             selectedWordsArray.includes(word.text)
-        ).slice(0, this.count);
+        ).slice(0, this.count).map(word => ({
+            text: word.text,
+            translation: word.translation,
+            phonetics: word.phonetics,
+            type: word.type,
+            category: word.category,
+            level: word.level,
+            // ДОБАВЛЯЕМ ИЗОБРАЖЕНИЕ ИЗ data-image-url
+            imageUrl: this.getWordImageUrl(word.text)
+        }));
         
         console.log('✅ Words selected for training:', wordsForTraining.length);
         return wordsForTraining;
+    }
+
+    // Получение URL изображения для слова
+    getWordImageUrl(wordText) {
+        const wordCard = document.querySelector(`.word-card[data-word="${wordText}"]`);
+        return wordCard ? wordCard.dataset.imageUrl : null;
     }
 
     // Создание индикатора прогресса
@@ -1421,7 +1473,9 @@ Object.assign(WordTraining.prototype, {
         // Формируем последовательность активных режимов
         this.activeModesSequence = [];
         if (this.trainingModes.flashcards) this.activeModesSequence.push('flashcards');
+        if (this.trainingModes.memory) this.activeModesSequence.push('memory');
         if (this.trainingModes.translation) this.activeModesSequence.push('translation');
+        if (this.trainingModes.fillblanks) this.activeModesSequence.push('fillblanks');
         if (this.trainingModes.matching) this.activeModesSequence.push('matching');
         if (this.trainingModes.spelling) this.activeModesSequence.push('spelling');
 
@@ -1456,8 +1510,14 @@ Object.assign(WordTraining.prototype, {
             case 'flashcards':
                 this.createFlashcardsModal();
                 break;
+            case 'memory':
+                this.createMemoryGameModal();
+                break;
             case 'translation':
                 this.createTranslationQuizModal();
+                break;
+            case 'fillblanks': 
+                this.createFillBlanksModal();
                 break;
             case 'matching':
                 this.createMatchingModal();
@@ -1624,6 +1684,152 @@ Object.assign(WordTraining.prototype, {
         }
     },
 
+    //// РЕЖИМ: Memory Game 
+    createMemoryGameModal() {
+        let flippedCards = [];
+        let matchedCards = new Set();
+        let correctMatches = 0;
+        let moves = 0;
+        
+        // Создаем пары карточек
+        const cards = [];
+        this.selectedWords.forEach((word, index) => {
+            // Карточка с переводом
+            cards.push({
+                id: `translation-${index}`,
+                type: 'translation',
+                content: word.translation,
+                matchId: index
+            });
+            
+            // Карточка с изображением и английским словом
+            cards.push({
+                id: `word-${index}`,
+                type: 'word',
+                content: word.text,
+                image: word.imageUrl || word.image || `https://via.placeholder.com/100x80?text=${word.text}`,
+                matchId: index
+            });
+        });
+        
+        // Перемешиваем карточки
+        const shuffledCards = cards.sort(() => Math.random() - 0.5);
+        
+        const modal = document.createElement('div');
+        modal.className = 'memory-game-modal';
+
+        modal.innerHTML = `
+            <div class="memory-game-content">
+                <div class="memory-game-header">
+                    <h2 class="memory-game-title">Memory Game</h2>
+                    <button class="memory-game-close close-memory">×</button>
+                </div>
+                
+                ${this.createProgressIndicator('memory', 0, this.selectedWords.length)}
+
+                <div class="memory-grid">
+                    ${shuffledCards.map(card => `
+                        <div class="memory-card" data-id="${card.id}" data-match-id="${card.matchId}">
+                            <div class="memory-card-inner">
+                                <div class="memory-card-back">
+                                    🧠
+                                </div>
+                                <div class="memory-card-front">
+                                    ${card.type === 'word' ? `
+                                        <img src="${card.image}" alt="${card.content}" class="memory-card-image">
+                                        <span class="memory-card-text-word">${card.content}</span>
+                                    ` : `
+                                        <span class="memory-card-text-translation">${card.content}</span>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="memory-game-footer">
+                    <button class="memory-next-btn" disabled>
+                        Продолжить
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Обработчики событий
+        modal.querySelector('.close-memory').addEventListener('click', () => {
+            modal.remove();
+            this.currentModeIndex++;
+            this.startNextMode();
+        });
+
+        // Игровая логика
+        const memoryCards = modal.querySelectorAll('.memory-card');
+        const nextBtn = modal.querySelector('.memory-next-btn');
+        const progressBar = modal.querySelector('[style*="background: var(--accent-color)"]');
+
+        memoryCards.forEach(card => {
+            card.addEventListener('click', () => {
+                if (card.classList.contains('flipped') || card.classList.contains('matched') || flippedCards.length >= 2) {
+                    return;
+                }
+
+                // Переворачиваем карточку
+                card.classList.add('flipped');
+                flippedCards.push(card);
+
+                if (flippedCards.length === 2) {
+                    moves++;
+
+                    const card1 = flippedCards[0];
+                    const card2 = flippedCards[1];
+                    const match1 = card1.dataset.matchId;
+                    const match2 = card2.dataset.matchId;
+
+                    if (match1 === match2) {
+                        // Совпадение найдено
+                        setTimeout(() => {
+                            card1.classList.add('matched');
+                            card2.classList.add('matched');
+                            
+                            // Добавляем класс matched к front элементам
+                            card1.querySelector('.memory-card-front').classList.add('matched');
+                            card2.querySelector('.memory-card-front').classList.add('matched');
+                            
+                            matchedCards.add(match1);
+                            correctMatches++;
+                            
+                            if (progressBar) {
+                                progressBar.style.width = `${(correctMatches / this.selectedWords.length) * 100}%`;
+                            }
+
+                            if (correctMatches === this.selectedWords.length) {
+                                nextBtn.disabled = false;
+                                this.totalCorrectAnswers += correctMatches;
+                            }
+
+                            flippedCards = [];
+                        }, 500);
+                    } else {
+                        // Нет совпадения
+                        setTimeout(() => {
+                            card1.classList.remove('flipped');
+                            card2.classList.remove('flipped');
+                            flippedCards = [];
+                        }, 1000);
+                    }
+                }
+            });
+        });
+
+        nextBtn.addEventListener('click', () => {
+            modal.remove();
+            this.currentModeIndex++;
+            this.startNextMode();
+        });
+    },
+
     // РЕЖИМ: Проверка перевода
     createTranslationQuizModal() {
         let currentIndex = 0;
@@ -1754,6 +1960,193 @@ Object.assign(WordTraining.prototype, {
         };
     
         updateQuiz();
+        document.body.appendChild(modal);
+    },
+
+    // РЕЖИМ: Fill in the Blanks
+    createFillBlanksModal() {
+        let currentIndex = 0;
+        let correctAnswers = 0;
+
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1002;
+        `;
+
+        const getWordExamples = (word) => {
+            // Находим HTML элемент для этого слова
+            const wordCard = document.querySelector(`[data-word="${word.text}"]`);
+            if (!wordCard) {
+                return [];
+            }
+
+            const examples = [];
+            
+            // Получаем основной пример из .word-example
+            const exampleElement = wordCard.querySelector('.word-example');
+            if (exampleElement && exampleElement.textContent.trim()) {
+                examples.push(exampleElement.textContent.trim());
+            }
+            
+            // Получаем дополнительные примеры из data-extra-examples
+            const extraExamples = wordCard.getAttribute('data-extra-examples');
+            if (extraExamples) {
+                const additionalExamples = extraExamples.split('|').map(ex => ex.trim()).filter(ex => ex.length > 0);
+                examples.push(...additionalExamples);
+            }
+            
+            return examples;
+        };
+
+        const findBestExample = (word) => {
+            const examples = getWordExamples(word);
+            
+            // Ищем пример, который содержит наше слово
+            for (let example of examples) {
+                const wordRegex = new RegExp(`\\b${word.text}\\b`, 'i');
+                if (wordRegex.test(example)) {
+                    return example;
+                }
+            }
+            
+            // Если не нашли, создаем простой пример
+            return `The ${word.text} is very important.`;
+        };
+
+        const updateFillBlanks = () => {
+            const word = this.selectedWords[currentIndex];
+            const example = findBestExample(word);
+            
+            // Заменяем слово на пропуск (только первое вхождение)
+            const wordRegex = new RegExp(`\\b${word.text}\\b`, 'i');
+            const blankSentence = example.replace(wordRegex, '_____');
+            
+            modal.innerHTML = `
+                <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                        <h2 style="color: var(--card-text-primary); font-size: 24px; margin: 0;">Fill in the Blanks</h2>
+                        <button class="close-fillblanks" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer;">×</button>
+                    </div>
+
+                    ${this.createProgressIndicator('fillblanks', currentIndex + 1, this.selectedWords.length)}
+
+                    <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
+                        <div style="background: white; padding: 32px 24px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); max-width: 600px; width: 100%;">
+                            <p style="color: #2c3e50; font-size: 24px; margin: 0; line-height: 1.5; font-weight: 500;">
+                                ${blankSentence}
+                            </p>
+                        </div>
+                        
+                        <div style="color: var(--card-text-secondary); font-size: 16px; margin-bottom: 24px;">
+                            <strong>Перевод:</strong> ${word.translation}
+                        </div>
+                        
+                        <div style="margin-bottom: 24px;">
+                            <input type="text" id="answer-input" placeholder="Введите пропущенное слово..." 
+                                style="width: 350px; padding: 12px; border: 2px solid var(--card-stroke); 
+                                border-radius: 8px; font-size: 16px; text-align: center; background: white; 
+                                color: var(--card-text-primary); outline: none; transition: all 0.3s ease;">
+                        </div>
+                        
+                        <button class="check-answer" style="background: var(--accent-color); color: white; 
+                            padding: 12px 32px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; 
+                            transition: all 0.3s ease;">
+                            Проверить
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            // Добавляем стили
+            const style = document.createElement('style');
+            style.textContent = `
+                #answer-input:focus {
+                    border-color: var(--accent-color) !important;
+                    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2) !important;
+                }
+                .check-answer:hover {
+                    background: var(--text-hover) !important;
+                    transform: translateY(-2px) !important;
+                }
+                .close-fillblanks:hover {
+                    color: #e74c3c !important;
+                }
+            `;
+            document.head.appendChild(style);
+
+            // Фокус на поле ввода
+            setTimeout(() => {
+                const input = modal.querySelector('#answer-input');
+                if (input) input.focus();
+            }, 100);
+
+            // Обработчики событий
+            const input = modal.querySelector('#answer-input');
+            const checkBtn = modal.querySelector('.check-answer');
+
+            const checkAnswer = () => {
+                const userAnswer = input.value.trim().toLowerCase();
+                const correctAnswer = word.text.toLowerCase();
+                const isCorrect = userAnswer === correctAnswer;
+
+                if (isCorrect) {
+                    correctAnswers++;
+                    input.style.borderColor = '#00b894';
+                    input.style.backgroundColor = '#d1f2eb';
+                    input.style.color = '#00b894';
+                    checkBtn.textContent = 'Правильно! ✓';
+                    checkBtn.style.background = 'linear-gradient(135deg, #00b894 0%, #00a085 100%)';
+                } else {
+                    input.style.borderColor = '#e74c3c';
+                    input.style.backgroundColor = '#fadbd8';
+                    input.style.color = '#e74c3c';
+                    input.value = word.text;
+                    checkBtn.textContent = `Неправильно. Ответ: ${word.text}`;
+                    checkBtn.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
+                }
+
+                checkBtn.disabled = true;
+                input.disabled = true;
+
+                setTimeout(() => {
+                    if (currentIndex < this.selectedWords.length - 1) {
+                        currentIndex++;
+                        updateFillBlanks();
+                    } else {
+                        this.totalCorrectAnswers += correctAnswers;
+                        modal.remove();
+                        this.currentModeIndex++;
+                        this.startNextMode();
+                    }
+                }, 2000);
+            };
+
+            checkBtn.addEventListener('click', checkAnswer);
+            
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    checkAnswer();
+                }
+            });
+
+            modal.querySelector('.close-fillblanks').addEventListener('click', () => {
+                // НЕ добавляем correctAnswers при закрытии
+                modal.remove();
+                this.currentModeIndex++;
+                this.startNextMode();
+            });
+        };
+
+        updateFillBlanks();
         document.body.appendChild(modal);
     },
 
@@ -2123,88 +2516,99 @@ Object.assign(WordTraining.prototype, {
 
     // Модальное окно завершения тренировки
     showCompletionModal() {
-        const modal = document.createElement('div');
-        modal.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1002;
-        `;
-        
-        const totalPossibleAnswers = this.activeModesSequence.reduce((total, mode) => {
-            if (mode === 'translation' || mode === 'matching' || mode === 'spelling') {
-                return total + this.selectedWords.length;
-            }
-            return total;
-        }, 0);
-
-        const successRate = totalPossibleAnswers > 0 ? (this.totalCorrectAnswers / totalPossibleAnswers) : 0;
-        const successPercentage = Math.round(successRate * 100);
-
-        modal.innerHTML = `
-            <div style="background: var(--card-bg); width: 95vw; max-width: 500px; border-radius: 12px; padding: 32px; text-align: center;">
-                <div style="font-size: 64px; margin-bottom: 16px;">${successPercentage >= 90 ? '🎉' : '📚'}</div>
-                <h2 style="color: var(--card-text-primary); font-size: 24px; margin-bottom: 16px;">Тренировка завершена!</h2>
-                <p style="color: var(--card-text-tertiary); font-size: 18px; margin-bottom: 16px;">
-                    Результат: <strong style="color: var(--card-text-primary);">${successPercentage}%</strong>
-                </p>
-                <p style="color: var(--card-text-tertiary); font-size: 16px; margin-bottom: 16px;">
-                    Правильных ответов: <strong style="color: var(--card-text-primary);">${this.totalCorrectAnswers}</strong> из <strong>${totalPossibleAnswers}</strong>
-                </p>
-                ${successPercentage >= 90 ? `
-                    <p style="color: var(--correct-text); font-size: 18px; margin-bottom: 32px; font-weight: 600; background: var(--correct-bg); padding: 12px; border-radius: 8px; border: 1px solid var(--correct-border);">
-                        🎉 Отлично! Слова переведены в "Изучено"
-                    </p>
-                ` : `
-                    <p style="color: var(--card-text-tertiary); font-size: 16px; margin-bottom: 32px; background: var(--neutral-bg); padding: 12px; border-radius: 8px; border: 1px solid var(--neutral-border);">
-                        📚 Нужно 90%+ для перевода слов в "Изучено"
-                    </p>
-                `}
-                <button class="close-completion" style="padding: 12px 32px; background: var(--accent-color); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; transition: all 0.3s ease; width: 100%;">
-                    Закрыть
-                </button>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        // Обновляем статистику в приложении
-        if (window.cambridgeApp) {
-            window.cambridgeApp.updateTrainingStats(this.totalCorrectAnswers, totalPossibleAnswers, this.selectedWords);
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1002;
+    `;
+    
+    // ИСПРАВЛЕННЫЙ подсчет - добавлены недостающие режимы
+    const totalPossibleAnswers = this.activeModesSequence.reduce((total, mode) => {
+        if (mode === 'translation' || mode === 'matching' || mode === 'spelling' || mode === 'memory' || mode === 'fillblanks') {
+            return total + this.selectedWords.length;
         }
+        return total;
+    }, 0);
 
-        modal.querySelector('.close-completion').addEventListener('click', () => {
-            modal.remove();
-            this.totalCorrectAnswers = 0;
-            this.currentModeIndex = 0;
-            this.currentCardIndex = 0;
-            
-            // Очищаем выбранные слова в основном приложении
-            if (window.cambridgeApp) {
-                window.cambridgeApp.clearSelection();
-            }
-        });
+    // ИСПРАВЛЕНИЕ: ограничиваем правильные ответы максимальным возможным количеством
+    const actualCorrectAnswers = Math.min(this.totalCorrectAnswers, totalPossibleAnswers);
+    
+    const successRate = totalPossibleAnswers > 0 ? (actualCorrectAnswers / totalPossibleAnswers) : 0;
+    const successPercentage = Math.min(100, Math.round(successRate * 100));
 
-        // Hover эффект для кнопки
-        const closeBtn = modal.querySelector('.close-completion');
-        closeBtn.addEventListener('mouseenter', () => {
-            closeBtn.style.background = 'var(--text-hover)';
-            closeBtn.style.transform = 'translateY(-2px)';
-            closeBtn.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
-        });
+    console.log('🔢 Debug calculation:');
+    console.log('Active modes:', this.activeModesSequence);
+    console.log('Raw total correct answers:', this.totalCorrectAnswers);
+    console.log('Actual correct answers (limited):', actualCorrectAnswers);
+    console.log('Total possible answers:', totalPossibleAnswers);
+    console.log('Success percentage:', successPercentage);
 
-        closeBtn.addEventListener('mouseleave', () => {
-            closeBtn.style.background = 'var(--accent-color)';
-            closeBtn.style.transform = 'translateY(0)';
-            closeBtn.style.boxShadow = 'none';
-        });
+    modal.innerHTML = `
+        <div style="background: var(--card-bg); width: 95vw; max-width: 500px; border-radius: 12px; padding: 32px; text-align: center;">
+            <div style="font-size: 64px; margin-bottom: 16px;">${successPercentage >= 90 ? '🎉' : '📚'}</div>
+            <h2 style="color: var(--card-text-primary); font-size: 24px; margin-bottom: 16px;">Тренировка завершена!</h2>
+            <p style="color: var(--card-text-tertiary); font-size: 18px; margin-bottom: 16px;">
+                Результат: <strong style="color: var(--card-text-primary);">${successPercentage}%</strong>
+            </p>
+            <p style="color: var(--card-text-tertiary); font-size: 16px; margin-bottom: 16px;">
+                Правильных ответов: <strong style="color: var(--card-text-primary);">${actualCorrectAnswers}</strong> из <strong>${totalPossibleAnswers}</strong>
+            </p>
+            ${successPercentage >= 90 ? `
+                <p style="color: var(--correct-text); font-size: 18px; margin-bottom: 32px; font-weight: 600; background: var(--correct-bg); padding: 12px; border-radius: 8px; border: 1px solid var(--correct-border);">
+                    🎉 Отлично! Слова переведены в "Изучено"
+                </p>
+            ` : `
+                <p style="color: var(--card-text-tertiary); font-size: 16px; margin-bottom: 32px; background: var(--neutral-bg); padding: 12px; border-radius: 8px; border: 1px solid var(--neutral-border);">
+                    📚 Нужно 90%+ для перевода слов в "Изучено"
+                </p>
+            `}
+            <button class="close-completion" style="padding: 12px 32px; background: var(--accent-color); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; transition: all 0.3s ease; width: 100%;">
+                Закрыть
+            </button>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Обновляем статистику в приложении с исправленными данными
+    if (window.cambridgeApp) {
+        window.cambridgeApp.updateTrainingStats(actualCorrectAnswers, totalPossibleAnswers, this.selectedWords);
     }
+
+    modal.querySelector('.close-completion').addEventListener('click', () => {
+        modal.remove();
+        this.totalCorrectAnswers = 0;
+        this.currentModeIndex = 0;
+        this.currentCardIndex = 0;
+        
+        // Очищаем выбранные слова в основном приложении
+        if (window.cambridgeApp) {
+            window.cambridgeApp.clearSelection();
+        }
+    });
+
+    // Hover эффект для кнопки
+    const closeBtn = modal.querySelector('.close-completion');
+    closeBtn.addEventListener('mouseenter', () => {
+        closeBtn.style.background = 'var(--text-hover)';
+        closeBtn.style.transform = 'translateY(-2px)';
+        closeBtn.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
+    });
+
+    closeBtn.addEventListener('mouseleave', () => {
+        closeBtn.style.background = 'var(--accent-color)';
+        closeBtn.style.transform = 'translateY(0)';
+        closeBtn.style.boxShadow = 'none';
+    });
+}
 });
 
 // Дополнительные утилиты и инициализация
