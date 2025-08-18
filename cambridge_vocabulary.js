@@ -26,8 +26,26 @@ class CambridgeVocabulary {
         setTimeout(() => this.filterWordsByStatus(), 1000);
         
         this.initializeFavoriteButtons();
+        this.addCategoryCheckboxes();
 
         console.log('✅ Cambridge Vocabulary initialized');
+        
+        // Восстанавливаем состояние избранного при загрузке
+        this.initializeFavoriteButtons();
+
+        const savedFilter = localStorage.getItem('cambridge_filter_favorites');
+        if (savedFilter === 'favorites') {
+            const filterSelect = document.getElementById('filterSelect');
+            if (filterSelect) {
+                filterSelect.value = 'favorites';
+                this.filterByFavorites();
+            }
+        }
+        
+        // ← ЗАМЕНИТЬ ВСЕ setTimeout НА ПРЯМЫЕ ВЫЗОВЫ:
+        // Обновляем счетчики категорий СРАЗУ после инициализации
+        this.updateCategoryVisibility();
+        this.updateAllCategoryCheckboxes();
     }
 
     // Загрузка статистики из localStorage
@@ -55,6 +73,18 @@ class CambridgeVocabulary {
     initializeWordsFromHTML() {
         console.log('📖 Initializing words from HTML...');
         
+        // Сначала пытаемся загрузить сохраненные данные из localStorage
+        let savedWords = [];
+        try {
+            const saved = localStorage.getItem('cambridge_dictionary');
+            if (saved) {
+                savedWords = JSON.parse(saved);
+                console.log('💾 Found saved words in localStorage:', savedWords.length);
+            }
+        } catch (error) {
+            console.error('❌ Error loading saved words:', error);
+        }
+        
         this.words = [];
         const wordCards = document.querySelectorAll('.word-card[data-word]');
         
@@ -63,15 +93,37 @@ class CambridgeVocabulary {
         wordCards.forEach(card => {
             const wordData = this.extractWordFromCard(card);
             if (wordData) {
-                this.words.push(wordData);
+                // Проверяем, есть ли это слово в сохраненных данных
+                const savedWord = savedWords.find(w => w.text === wordData.text);
+                if (savedWord) {
+                    // Используем сохраненные данные (включая favorite статус)
+                    // Но обновляем другие поля из HTML на случай изменений
+                    const mergedWord = {
+                        ...wordData,  // Данные из HTML
+                        favorite: savedWord.favorite || false,  // Сохраняем статус избранного
+                        // Сохраняем любые другие пользовательские данные
+                        ...Object.fromEntries(
+                            Object.entries(savedWord).filter(([key]) => 
+                                !['text', 'translation', 'phonetics', 'type', 'category', 'level', 'imageUrl'].includes(key)
+                            )
+                        )
+                    };
+                    this.words.push(mergedWord);
+                    console.log('🔄 Restored word with favorites:', mergedWord.text, 'favorite:', mergedWord.favorite);
+                } else {
+                    // Новое слово, используем данные из HTML
+                    wordData.favorite = false;  // По умолчанию не в избранном
+                    this.words.push(wordData);
+                }
             }
         });
 
         console.log(`✅ Initialized ${this.words.length} words from HTML`);
         
-        // Сохраняем в localStorage для совместимости
+        // Сохраняем обновленные данные (НЕ перезаписываем, а объединяем)
         localStorage.setItem('cambridge_dictionary', JSON.stringify(this.words));
     }
+
 
     // Извлечение данных о слове из HTML карточки
     extractWordFromCard(card) {
@@ -79,7 +131,7 @@ class CambridgeVocabulary {
             const wordText = card.dataset.word;
             const category = card.dataset.category || 'nouns';
             const level = card.dataset.level || 'pre-a1';
-            const imageUrl = card.dataset.imageUrl; // Извлекаем URL картинки
+            const imageUrl = card.dataset.imageUrl;
             
             const translationElement = card.querySelector('.word-translation');
             const phoneticElement = card.querySelector('.word-phonetics');
@@ -97,7 +149,8 @@ class CambridgeVocabulary {
                 type: typeElement ? typeElement.textContent.trim() : '',
                 category: category,
                 level: level,
-                imageUrl: imageUrl || 'assets/img/default-word.svg' // Добавляем URL картинки с fallback
+                imageUrl: imageUrl || 'assets/img/default-word.svg',
+                favorite: false  // По умолчанию НЕ в избранном (будет перезаписано если есть сохраненные данные)
             };
         } catch (error) {
             console.error('❌ Error extracting word from card:', error);
@@ -159,6 +212,14 @@ class CambridgeVocabulary {
                 
                 // Фильтруем слова
                 this.filterWordsByStatus();
+                const savedFilter = localStorage.getItem('cambridge_filter_favorites');
+                if (savedFilter && savedFilter !== 'all') {
+                    const filterSelect = document.getElementById('filterSelect');
+                    if (filterSelect) {
+                        filterSelect.value = savedFilter;
+                        this.filterByFavorites();
+                    }
+                }
 
                 // Пересчитываем числа в категориях под текущую вкладку
                 this.updateCategoryVisibility();
@@ -327,6 +388,9 @@ class CambridgeVocabulary {
         this.filterWordsByStatus();
         this.updateStatistics();
         
+        // ДОБАВИТЬ ЭТУ СТРОЧКУ в конец:
+        this.updateCategoryVisibility();
+        
         console.log(`✅ Batch ${isStudyingTab ? 'marked as learned' : 'returned to studying'}:`, selectedArray.length, 'words');
     }
 
@@ -454,6 +518,20 @@ class CambridgeVocabulary {
             localStorage.setItem('cambridge_dictionary', JSON.stringify(this.words));
             
             console.log('✅ Word favorite status updated:', wordText, 'favorite:', word.favorite);
+            
+            // НОВОЕ: Если мы находимся во вкладке "Избранное", нужно перефильтровать
+            const filterSelect = document.getElementById('filterSelect');
+            if (filterSelect && filterSelect.value === 'favorites') {
+                // Если слово удалено из избранного во вкладке "Избранное", скрываем его моментально
+                if (!word.favorite) {
+                    const card = document.querySelector(`.word-card[data-word="${wordText}"]`);
+                    if (card) {
+                        card.style.display = 'none';
+                    }
+                    this.updateVisibleWordsCount();
+                    this.updateCategoryVisibility();
+                }
+            }
         } else {
             console.error('❌ Word not found in words array:', wordText);
         }
@@ -469,8 +547,13 @@ class CambridgeVocabulary {
                 const wordText = wordCard.dataset.word;
                 const word = this.words.find(w => w.text === wordText);
                 
+                // Сначала убираем класс active
+                button.classList.remove('active');
+                
+                // Затем добавляем, если слово в избранном
                 if (word && word.favorite) {
                     button.classList.add('active');
+                    console.log('🌟 Found favorite word:', wordText);
                 }
             }
         });
@@ -508,11 +591,13 @@ class CambridgeVocabulary {
     setupFilters() {
         // Фильтр по избранным
         const filterSelect = document.getElementById('filterSelect');
-        if (filterSelect) {
-            filterSelect.addEventListener('change', () => {
-                this.filterByFavorites();
-            });
-        }
+if (filterSelect) {
+    filterSelect.addEventListener('change', () => {
+        // Сохраняем выбранный фильтр
+        localStorage.setItem('cambridge_filter_favorites', filterSelect.value);
+        this.filterByFavorites();
+    });
+}
 
         // Поиск
         const searchInput = document.getElementById('searchInput');
@@ -556,6 +641,195 @@ class CambridgeVocabulary {
     isWordLearned(wordText) {
         const stats = this.wordStats[wordText];
         return stats && stats.successfulAttempts >= 1;
+    }
+    addCategoryCheckboxes() {
+        console.log('📋 Adding category checkboxes...');
+        
+        const categoryHeaders = document.querySelectorAll('.category-header');
+        
+        categoryHeaders.forEach(header => {
+            // Проверяем, есть ли уже чекбокс
+            if (header.querySelector('.category-checkbox')) {
+                return; // Уже добавлен
+            }
+            
+            const categorySection = header.parentElement;
+            const categoryData = categorySection.dataset.category || 'unknown';
+            const categoryTitle = header.querySelector('.category-title');
+            
+            if (categoryTitle) {
+                // Создаем контейнер для чекбокса и названия
+                const leftContainer = document.createElement('div');
+                leftContainer.style.cssText = `
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    flex: 1;
+                `;
+                
+                // Создаем чекбокс
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'category-checkbox';
+                checkbox.dataset.category = categoryData;
+                checkbox.style.cssText = `
+                    width: 18px;
+                    height: 18px;
+                    cursor: pointer;
+                    accent-color: var(--accent-primary);
+                    border-radius: 3px;
+                `;
+                
+                // Обработчик события для чекбокса категории
+                checkbox.addEventListener('change', (e) => {
+                    e.stopPropagation(); // Предотвращаем сворачивание категории
+                    this.toggleCategorySelection(categoryData, checkbox.checked);
+                });
+                
+                // Перемещаем элементы
+                const originalTitle = categoryTitle.textContent;
+                categoryTitle.textContent = '';
+                
+                leftContainer.appendChild(checkbox);
+                
+                const titleSpan = document.createElement('span');
+                titleSpan.textContent = originalTitle;
+                titleSpan.style.cssText = `
+                    font-size: 1.4rem;
+                    font-weight: 700;
+                    color: var(--card-text-primary);
+                    cursor: pointer;
+                `;
+                
+                // При клике на название - сворачиваем/разворачиваем категорию
+                titleSpan.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleCategory(header);
+                });
+                
+                leftContainer.appendChild(titleSpan);
+                
+                // Заменяем оригинальный title на новый контейнер
+                header.replaceChild(leftContainer, categoryTitle);
+            }
+        });
+        
+        console.log('✅ Category checkboxes added');
+    }
+
+    // Переключение выбора всех слов в категории
+    toggleCategorySelection(categoryData, isSelected) {
+        console.log(`📂 Toggling category "${categoryData}" selection:`, isSelected);
+        
+        // Находим все слова в этой категории
+        const categorySection = document.querySelector(`.category-section[data-category="${categoryData}"]`);
+        if (!categorySection) {
+            console.warn('❌ Category section not found:', categoryData);
+            return;
+        }
+        
+        // Получаем все видимые карточки слов в категории
+        const wordCards = categorySection.querySelectorAll('.word-card[data-word]');
+        const visibleWordCards = Array.from(wordCards).filter(card => 
+            card.style.display !== 'none'
+        );
+        
+        console.log(`Found ${visibleWordCards.length} visible words in category "${categoryData}"`);
+        
+        let changedCount = 0;
+        
+        visibleWordCards.forEach(card => {
+            const wordText = card.dataset.word;
+            const checkbox = card.querySelector('.word-checkbox');
+            
+            if (checkbox && checkbox.checked !== isSelected) {
+                checkbox.checked = isSelected;
+                
+                // Обновляем выбранные слова
+                if (isSelected) {
+                    this.selectedWords.add(wordText);
+                } else {
+                    this.selectedWords.delete(wordText);
+                }
+                
+                changedCount++;
+            }
+        });
+        
+        console.log(`✅ Changed selection for ${changedCount} words in category "${categoryData}"`);
+        
+        // Обновляем UI
+        this.updateStudyButton();
+        this.updateBatchActions();
+        this.updateSelectAllCheckbox();
+        this.updateAllCategoryCheckboxes();
+    }
+
+    // Обновление состояния всех чекбоксов категорий
+    updateAllCategoryCheckboxes() {
+        const categoryCheckboxes = document.querySelectorAll('.category-checkbox');
+        
+        categoryCheckboxes.forEach(categoryCheckbox => {
+            const categoryData = categoryCheckbox.dataset.category;
+            const categorySection = document.querySelector(`.category-section[data-category="${categoryData}"]`);
+            
+            if (categorySection) {
+                const visibleWordCards = Array.from(categorySection.querySelectorAll('.word-card[data-word]'))
+                    .filter(card => card.style.display !== 'none');
+                
+                const selectedWordsInCategory = visibleWordCards.filter(card => {
+                    const checkbox = card.querySelector('.word-checkbox');
+                    return checkbox && checkbox.checked;
+                });
+                
+                // Обновляем состояние чекбокса категории
+                if (selectedWordsInCategory.length === 0) {
+                    categoryCheckbox.checked = false;
+                    categoryCheckbox.indeterminate = false;
+                } else if (selectedWordsInCategory.length === visibleWordCards.length) {
+                    categoryCheckbox.checked = true;
+                    categoryCheckbox.indeterminate = false;
+                } else {
+                    categoryCheckbox.checked = false;
+                    categoryCheckbox.indeterminate = true;
+                }
+            }
+        });
+        this.updateCategoryVisibility();
+    }
+
+    // Обновление состояния чекбокса категории
+    updateCategoryCheckboxState(wordCard) {
+        const categorySection = wordCard.closest('.category-section');
+        if (!categorySection) return;
+        
+        const categoryData = categorySection.dataset.category;
+        const categoryCheckbox = categorySection.querySelector('.category-checkbox');
+        if (!categoryCheckbox) return;
+        
+        // Получаем все видимые слова в категории
+        const visibleWordCards = Array.from(categorySection.querySelectorAll('.word-card[data-word]'))
+            .filter(card => card.style.display !== 'none');
+        
+        const selectedWordsInCategory = visibleWordCards.filter(card => {
+            const checkbox = card.querySelector('.word-checkbox');
+            return checkbox && checkbox.checked;
+        });
+        
+        // Определяем состояние чекбокса категории
+        if (selectedWordsInCategory.length === 0) {
+            // Ничего не выбрано
+            categoryCheckbox.checked = false;
+            categoryCheckbox.indeterminate = false;
+        } else if (selectedWordsInCategory.length === visibleWordCards.length) {
+            // Все выбрано
+            categoryCheckbox.checked = true;
+            categoryCheckbox.indeterminate = false;
+        } else {
+            // Частично выбрано
+            categoryCheckbox.checked = false;
+            categoryCheckbox.indeterminate = true;
+        }
     }
 }
 
@@ -1013,6 +1287,7 @@ updateSwitcherBadges() {
             setTimeout(() => {
                 this.updateStatistics();
                 this.filterWordsByStatus();
+                this.updateCategoryVisibility(); 
             }, 500);
             
             console.log('🎯 Training stats update completed');
@@ -2535,11 +2810,12 @@ Object.assign(WordTraining.prototype, {
 
                 ${this.createProgressIndicator('matching', 0, pairs.length)}
 
-                <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px; box-sizing: border-box;">
-                    <div class="words-column" style="display: grid; gap: 16px; align-content: start; box-sizing: border-box;">
+                <!-- ИСПРАВЛЕННЫЙ КОНТЕЙНЕР С ПРОКРУТКОЙ -->
+                <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 20px; box-sizing: border-box; overflow: hidden;">
+                    <div class="words-column" style="display: grid; gap: 16px; align-content: start; box-sizing: border-box; overflow-y: auto; padding-right: 8px; max-height: 100%;">
                         ${words.map((pair) => createCardHTML(pair.word, pair.index, true)).join('')}
                     </div>
-                    <div class="translations-column" style="display: grid; gap: 16px; align-content: start; box-sizing: border-box;">
+                    <div class="translations-column" style="display: grid; gap: 16px; align-content: start; box-sizing: border-box; overflow-y: auto; padding-right: 8px; max-height: 100%;">
                         ${translations.map((pair) => createCardHTML(pair.translation, pair.index, false)).join('')}
                     </div>
                 </div>

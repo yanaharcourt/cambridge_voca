@@ -346,7 +346,7 @@ body {
 
 .filter-select {
     cursor: pointer;
-    min-width: 160px;
+    min-width: 280px;
     padding-right: 2.5rem;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23b6b9d0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
     background-repeat: no-repeat;
@@ -1816,4 +1816,190 @@ body {
 .memory-next-btn:not(:disabled) {
     opacity: 1;
     pointer-events: auto;
+}
+
+/* ====================================================================
+   СТИЛИ ДЛЯ ЧЕКБОКСОВ КАТЕГОРИЙ - добавьте в cambridge_vocabulary.css
+   ==================================================================== */
+
+/* Стили для чекбоксов категорий */
+.category-checkbox {
+    width: 18px !important;
+    height: 18px !important;
+    cursor: pointer !important;
+    accent-color: var(--accent-primary) !important;
+    border-radius: 3px !important;
+    border: 2px solid var(--card-stroke-secondary) !important;
+    background: var(--card-bg) !important;
+    transition: all 0.2s ease !important;
+    margin: 0 !important;
+    flex-shrink: 0 !important;
+}
+
+.category-checkbox:hover {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1) !important;
+}
+
+.category-checkbox:checked {
+    background: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+}
+
+.category-checkbox:indeterminate {
+    background: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+    opacity: 0.7 !important;
+}
+
+/* Контейнер для чекбокса и названия категории */
+.category-header {
+    padding: 20px 25px !important;
+    background: var(--card-bg-secondary) !important;
+    cursor: default !important; /* Убираем курсор pointer, так как теперь разные зоны */
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    transition: all 0.3s ease !important;
+    border-bottom: 2px solid var(--card-stroke) !important;
+}
+
+.category-header:hover {
+    background: var(--card-bg-tertiary) !important;
+}
+
+/* Стили для названия категории рядом с чекбоксом */
+.category-header span {
+    cursor: pointer !important;
+    user-select: none !important;
+    transition: color 0.2s ease !important;
+}
+
+.category-header span:hover {
+    color: var(--accent-primary) !important;
+}
+
+/* Дополнительные стили для состояния "частично выбрано" */
+.category-checkbox:indeterminate::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 8px;
+    height: 2px;
+    background: white;
+    border-radius: 1px;
+}
+
+/* Анимация для чекбоксов */
+.category-checkbox {
+    position: relative;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.category-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 6px;
+    width: 4px;
+    height: 8px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+    animation: checkmark 0.2s ease-in-out;
+}
+
+@keyframes checkmark {
+    0% {
+        opacity: 0;
+        transform: rotate(45deg) scale(0);
+    }
+    100% {
+        opacity: 1;
+        transform: rotate(45deg) scale(1);
+    }
+}
+
+/* Стили для визуального выделения выбранных категорий */
+.category-section.has-selected-words {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px rgba(102, 126, 234, 0.2);
+}
+
+.category-section.has-selected-words .category-header {
+    background: rgba(102, 126, 234, 0.05);
+}
+
+/* Стили для лучшего отображения на мобильных устройствах */
+@media (max-width: 768px) {
+    .category-checkbox {
+        width: 20px !important;
+        height: 20px !important;
+    }
+    
+    .category-header {
+        padding: 15px 20px !important;
+    }
+    
+    .category-header span {
+        font-size: 1.2rem !important;
+    }
+}
+
+/* Стили для доступности */
+.category-checkbox:focus {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+.category-checkbox:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* Дополнительные стили для темной темы (если используется) */
+@media (prefers-color-scheme: dark) {
+    .category-checkbox {
+        border-color: var(--card-stroke) !important;
+    }
+    
+    .category-checkbox:checked::after {
+        border-color: white !important;
+    }
+}
+
+.category-header {
+    transition: all 0.3s ease, background-color 0.2s ease !important;
+}
+
+.category-checkbox {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.category-header .category-title,
+.category-header span {
+    transition: color 0.2s ease !important;
+}
+
+.category-selected-indicator {
+    background: var(--accent-primary);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-left: 8px;
+    animation: fadeInScale 0.2s ease-out;
+}
+
+@keyframes fadeInScale {
+    0% {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
