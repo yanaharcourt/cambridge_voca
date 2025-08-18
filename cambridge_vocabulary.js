@@ -79,6 +79,7 @@ class CambridgeVocabulary {
             const wordText = card.dataset.word;
             const category = card.dataset.category || 'nouns';
             const level = card.dataset.level || 'pre-a1';
+            const imageUrl = card.dataset.imageUrl; // Извлекаем URL картинки
             
             const translationElement = card.querySelector('.word-translation');
             const phoneticElement = card.querySelector('.word-phonetics');
@@ -93,15 +94,10 @@ class CambridgeVocabulary {
                 text: wordText,
                 translation: translationElement.textContent.trim(),
                 phonetics: phoneticElement ? phoneticElement.textContent.trim() : '',
-                type: typeElement ? typeElement.textContent.trim() : 'noun',
+                type: typeElement ? typeElement.textContent.trim() : '',
                 category: category,
                 level: level,
-                dateAdded: Date.now(),
-                favorite: false,
-                synonyms: [],
-                antonyms: [],
-                example: '',
-                definition: ''
+                imageUrl: imageUrl || 'assets/img/default-word.svg' // Добавляем URL картинки с fallback
             };
         } catch (error) {
             console.error('❌ Error extracting word from card:', error);
@@ -404,21 +400,30 @@ class CambridgeVocabulary {
         document.addEventListener('click', (e) => {
             const target = e.target;
             
-            if (target.classList.contains('pronounce')) {
-                const wordCard = target.closest('.word-card');
-                const wordText = wordCard.dataset.word;
+            // Обрабатываем клики по кнопкам или их иконкам
+            const button = target.classList.contains('action-button') ? target : target.closest('.action-button');
+            if (!button) return;
+            
+            const wordCard = button.closest('.word-card');
+            if (!wordCard) return;
+            
+            const wordText = wordCard.dataset.word;
+            
+            if (button.classList.contains('pronounce')) {
+                e.preventDefault();
+                e.stopPropagation();
                 this.pronounceWord(wordText);
             }
             
-            if (target.classList.contains('favorite')) {
-                const wordCard = target.closest('.word-card');
-                const wordText = wordCard.dataset.word;
-                this.toggleFavorite(wordText, target);
+            if (button.classList.contains('favorite')) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleFavorite(wordText, button);
             }
             
-            if (target.classList.contains('delete')) {
-                const wordCard = target.closest('.word-card');
-                const wordText = wordCard.dataset.word;
+            if (button.classList.contains('delete')) {
+                e.preventDefault();
+                e.stopPropagation();
                 if (confirm(`Удалить слово "${wordText}"?`)) {
                     this.deleteWord(wordText);
                 }
@@ -745,13 +750,28 @@ updateSwitcherBadges() {
             // Применяем фильтр избранного
             const matchesFavorites = !showOnlyFavorites || word.favorite;
             
-            if (matchesStatus && matchesFavorites) {
+            // Проверяем другие активные фильтры
+            const searchInput = document.getElementById('searchInput');
+            const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+            const cardWordText = wordText.toLowerCase();
+            const translationElement = card.querySelector('.word-translation');
+            const translation = translationElement ? translationElement.textContent.toLowerCase() : '';
+            const matchesSearch = !searchTerm || cardWordText.includes(searchTerm) || translation.includes(searchTerm);
+            
+            const levelSelect = document.getElementById('levelSelect');
+            const selectedLevel = levelSelect ? levelSelect.value : 'all';
+            const cardLevel = card.dataset.level;
+            const matchesLevel = selectedLevel === 'all' || cardLevel === selectedLevel;
+            
+            if (matchesStatus && matchesFavorites && matchesSearch && matchesLevel) {
                 card.style.display = 'block';
             } else {
                 card.style.display = 'none';
             }
         });
         
+        // Обновляем видимость категорий
+        this.updateCategoryVisibility();
         this.updateVisibleWordsCount();
         console.log('⭐ Filtered by favorites:', showOnlyFavorites);
     },
@@ -832,18 +852,45 @@ updateSwitcherBadges() {
         // Берём все карточки внутри конкретной категории
         const cards = categorySection.querySelectorAll('.word-card[data-word]');
 
-        // Счёт по активной вкладке
+        // Получаем текущее состояние фильтров
+        const filterSelect = document.getElementById('filterSelect');
+        const showOnlyFavorites = filterSelect && filterSelect.value === 'favorites';
+        const searchInput = document.getElementById('searchInput');
+        const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+        const levelSelect = document.getElementById('levelSelect');
+        const selectedLevel = levelSelect ? levelSelect.value : 'all';
+
+        // Счёт по активной вкладке И всем фильтрам
         let count = 0;
         cards.forEach(card => {
-            const isLearned = this.isWordLearned(card.dataset.word);
-
+            const wordText = card.dataset.word;
+            const isLearned = this.isWordLearned(wordText);
+            
+            // Проверяем основной фильтр статуса (изучено/на изучении)
+            let matchesStatus = true;
             if (this.currentFilter === 'learned') {
-                if (isLearned) count++;
+                matchesStatus = isLearned;
             } else if (this.currentFilter === 'studying') {
-                if (!isLearned) count++;
-            } else {
-                // Fallback: если по какой-то причине фильтр не задан — считаем реально отображаемые
-                if (card.style.display !== 'none') count++;
+                matchesStatus = !isLearned;
+            }
+            
+            // Проверяем фильтр избранного
+            const word = this.getWord(wordText);
+            const matchesFavorites = !showOnlyFavorites || (word && word.favorite);
+            
+            // Проверяем поиск
+            const cardWordText = wordText.toLowerCase();
+            const translationElement = card.querySelector('.word-translation');
+            const translation = translationElement ? translationElement.textContent.toLowerCase() : '';
+            const matchesSearch = !searchTerm || cardWordText.includes(searchTerm) || translation.includes(searchTerm);
+            
+            // Проверяем уровень
+            const cardLevel = card.dataset.level;
+            const matchesLevel = selectedLevel === 'all' || cardLevel === selectedLevel;
+            
+            // Считаем только если слово проходит ВСЕ фильтры
+            if (matchesStatus && matchesFavorites && matchesSearch && matchesLevel) {
+                count++;
             }
         });
 
@@ -854,8 +901,9 @@ updateSwitcherBadges() {
         // Показываем/скрываем целиком секцию категории, исходя из количества
         categorySection.style.display = count === 0 ? 'none' : 'block';
     });
-}
-,
+
+    console.log('🏷️ Category visibility updated for current filters');
+},
 
     // Подсчет видимых слов
     updateVisibleWordsCount() {
@@ -1572,14 +1620,22 @@ Object.assign(WordTraining.prototype, {
     // HTML для флешкарточки
     createFlashcardHTML(word, index, total) {
         return `
-            <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                    <h2 style="color: var(--card-text-primary); font-size: 24px;">Флешкарточки (${index + 1}/${total})</h2>
-                    <button class="close-flashcards" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer;">×</button>
+            <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column; box-sizing: border-box;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; box-sizing: border-box;">
+                    <h2 style="color: var(--card-text-primary); font-size: 24px; margin: 0; box-sizing: border-box;">Флешкарточки (${index + 1}/${total})</h2>
+                    <button class="close-flashcards" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer; padding: 8px; transition: all 0.3s ease; box-sizing: border-box;">×</button>
                 </div>
                 
-                ${this.createProgressIndicator('flashcards', index + 1, total)}
-    
+                <div style="width: 100%; margin-bottom: 24px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: var(--card-text-tertiary); font-size: 14px;">Режим 1 из ${this.activeModesSequence.length}</span>
+                        <span style="color: var(--card-text-tertiary); font-size: 14px;">${index + 1}/${total}</span>
+                    </div>
+                    <div style="width: 100%; height: 4px; background: #e8ecff; border-radius: 2px;">
+                        <div style="width: ${((index + 1) / total) * 100}%; height: 100%; background: var(--accent-color); border-radius: 2px; transition: width 0.3s ease;"></div>
+                    </div>
+                </div>
+
                 <div class="flashcard-container" style="flex: 1; display: flex; align-items: center; justify-content: center; perspective: 1000px;">
                     <div style="position: relative; width: 100%; height: 400px;">
                         <div style="position: absolute; top: 8px; left: 4px; right: -4px; height: 400px; background: var(--card-bg-tertiary); border-radius: 12px; transform: scale(0.98);"></div>
@@ -1587,43 +1643,65 @@ Object.assign(WordTraining.prototype, {
 
                         <div class="flashcard" style="position: relative; width: 100%; height: 400px; background: var(--card-bg-secondary); border-radius: 12px; cursor: pointer; transition: transform 0.6s; transform-style: preserve-3d; border: 2px solid var(--card-stroke-secondary);">
             
+                            <!-- Передняя сторона карточки (слово) -->
                             <div class="card-front" style="position: absolute; width: 100%; height: 100%; backface-visibility: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
                                 <h3 style="color: var(--card-text-primary); font-size: 32px; margin-bottom: 16px;">${word.text}</h3>
                                 <p style="color: var(--card-text-tertiary); font-size: 20px;">${word.phonetics || ''}</p>
-                                <button class="pronounce-btn" style="background: none; border: 1px solid var(--accent-color); color: var(--accent-color); padding: 8px 16px; border-radius: 8px; cursor: pointer; margin-top: 16px; display: flex; align-items: center; gap: 8px; transition: all 0.3s ease;">
-                                    🔊 Прослушать
+                            
+                                <button class="pronounce-btn" 
+                                    style="background: none; border: 1px solid var(--accent-color); color: var(--accent-color); padding: 8px 16px; border-radius: 8px; cursor: pointer; margin-top: 16px; display: flex; align-items: center; gap: 8px; transition: all 0.3s ease;">
+
+                                    <img src="assets/img/Volume Small.svg" alt="play sound" 
+                                        style="width: 20px; height: 20px;">
+
+                                    Прослушать
                                 </button>
-                                <div style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; color: var(--card-text-tertiary); font-size: 14px;">
+
+                                <!-- Подпись на карточке -->
+                                <div style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; color: var(--card-text-tertiary); font-size: 14px; background: rgba(255, 255, 255, 0.1); padding: 8px 16px; border-radius: 20px; backdrop-filter: blur(10px);">
                                     <span style="margin-right: 8px;">↻</span>
                                     Нажмите чтобы перевернуть
                                 </div>
                             </div>
-                            <div class="card-back" style="position: absolute; width: 100%; height: 100%; backface-visibility: hidden; transform: rotateY(180deg); display: flex; align-items: center; justify-content: center; padding: 20px;">
-                                <h3 style="color: var(--card-text-primary); font-size: 32px; text-align: center;">${word.translation}</h3>
+
+                            <!-- Задняя сторона карточки (перевод + картинка) -->
+                            <div class="card-back" style="position: absolute; width: 100%; height: 100%; backface-visibility: hidden; transform: rotateY(180deg); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; gap: 0px;">
+                                <!-- Картинка слова -->
+                                <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 0px;">
+                                    <img src="${word.imageUrl || 'assets/img/default-word.svg'}" 
+                                        alt="${word.text}" 
+                                        style="width: 250px; height: 250px; object-fit: contain; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1));">
+                                </div>
+                                
+                                <!-- Перевод слова -->
+                                <h3 style="color: var(--card-text-primary); font-size: 32px; text-align: center; margin: 0;">${word.translation}</h3>
+                                
+                                <!-- Подпись на обратной стороне -->
+                                <div style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; color: var(--card-text-tertiary); font-size: 14px; background: rgba(255, 255, 255, 0.1); padding: 8px 16px; border-radius: 20px; backdrop-filter: blur(10px);">
+                                    <span style="margin-right: 8px;">↻</span>
+                                    Нажмите чтобы перевернуть
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
-    
-                <div style="display: flex; justify-content: center; gap: 16px; margin-top: 24px;">
-                    <button class="nav-btn prev-btn" ${index === 0 ? 'disabled' : ''} style="padding: 12px 24px; border-radius: 8px; border: 1px solid var(--card-stroke); cursor: pointer; transition: all 0.3s ease; background: var(--card-bg-secondary); color: var(--card-text-primary); ${index === 0 ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
-                        Назад
-                    </button>
-                    ${index === total - 1 ? `
-                        <button class="nav-btn next-btn" style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent-color); color: white; transition: all 0.3s ease;">
-                            Завершить
+
+                <!-- Навигация с кнопками Вперед/Назад -->
+                <div style="text-align: center; margin-top: 20px;">
+                    <div style="display: flex; justify-content: center; align-items: center; gap: 16px;">
+                        <button class="nav-btn prev-btn" ${index === 0 ? 'disabled' : ''} 
+                            style="padding: 12px 24px; font-size:16px; border-radius: 8px; border: 1px solid var(--card-stroke); cursor: pointer; transition: all 0.3s ease; background: var(--card-bg-secondary); color: var(--card-text-primary); ${index === 0 ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
+                            Назад
+                        </button>
+                        
+                        <button class="nav-btn next-btn" 
+                            style="display: flex; align-items: center; font-size:16px; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent-color); color: white; transition: all 0.3s ease;">
+                            ${index === total - 1 ? 'Вперед' : 'Вперед'}
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M5 12h14M12 5l7 7-7 7"/>
                             </svg>
                         </button>
-                    ` : `
-                        <button class="nav-btn next-btn" style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent-color); color: white; transition: all 0.3s ease;">
-                            Вперед
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M5 12h14M12 5l7 7-7 7"/>
-                            </svg>
-                        </button>
-                    `}
+                    </div>
                 </div>
             </div>
         `;
@@ -1716,23 +1794,42 @@ Object.assign(WordTraining.prototype, {
         const shuffledCards = cards.sort(() => Math.random() - 0.5);
         
         const modal = document.createElement('div');
-        modal.className = 'memory-game-modal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1002;
+        `;
 
         modal.innerHTML = `
-            <div class="memory-game-content">
-                <div class="memory-game-header">
-                    <h2 class="memory-game-title">Memory Game</h2>
-                    <button class="memory-game-close close-memory">×</button>
+            <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column; box-sizing: border-box;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; box-sizing: border-box;">
+                    <h2 style="color: var(--card-text-primary); font-size: 24px; margin: 0; box-sizing: border-box;">Memory Game</h2>
+                    <button class="close-memory" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer; padding: 8px; transition: all 0.3s ease; box-sizing: border-box;">×</button>
                 </div>
                 
-                ${this.createProgressIndicator('memory', 0, this.selectedWords.length)}
+                <div style="width: 100%; margin-bottom: 24px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: var(--card-text-tertiary); font-size: 14px;">Режим 2 из 6</span>
+                        <span style="color: var(--card-text-tertiary); font-size: 14px;">0/1</span>
+                    </div>
+                    <div style="width: 100%; height: 4px; background: #e8ecff; border-radius: 2px;">
+                        <div style="width: 0%; height: 100%; background: var(--accent-color); border-radius: 2px; transition: width 0.3s ease;"></div>
+                    </div>
+                </div>
 
-                <div class="memory-grid">
+                <div style="flex: 1; display: flex; flex-wrap: wrap; justify-content: center; align-content: flex-start; gap: 16px; padding: 20px; overflow-y: auto; overflow-x: hidden; max-width: 100%;">
                     ${shuffledCards.map(card => `
                         <div class="memory-card" data-id="${card.id}" data-match-id="${card.matchId}">
                             <div class="memory-card-inner">
                                 <div class="memory-card-back">
-                                    🧠
+                                    <img src="assets/img/thinking.svg" alt="Думаю..." class="thinking-icon" style="width: 200px; height: 200px; object-fit: contain;">
                                 </div>
                                 <div class="memory-card-front">
                                     ${card.type === 'word' ? `
@@ -1747,10 +1844,25 @@ Object.assign(WordTraining.prototype, {
                     `).join('')}
                 </div>
                 
-                <div class="memory-game-footer">
-                    <button class="memory-next-btn" disabled>
-                        Продолжить
-                    </button>
+                <!-- Новая навигация с кнопками Вперед/Назад -->
+                <div style="text-align: center; margin-top: 20px;">
+                    <div style="display: flex; justify-content: center; align-items: center; gap: 16px;">
+                        <button class="nav-btn memory-prev-btn" ${this.currentModeIndex === 0 ? 'disabled' : ''}
+                        style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; font-size:16px; border-radius: 8px; border: 1px solid var(--card-stroke); cursor: pointer; transition: all 0.3s ease; background: var(--card-bg-secondary); color: var(--card-text-primary); ${this.currentModeIndex === 0 ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 12H5M12 19l-7-7 7-7"/>
+                        </svg>
+                        Назад
+                        </button>
+                        
+                        <button class="memory-next-btn" disabled 
+                            style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent-color); color: white; transition: all 0.3s ease; opacity: 0.5;">
+                            ${this.currentModeIndex === this.activeModesSequence.length - 1 ? 'Завершить' : 'Вперед'}
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M5 12h14M12 5l7 7-7 7"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -1764,6 +1876,16 @@ Object.assign(WordTraining.prototype, {
             this.startNextMode();
         });
 
+        // Кнопка "Назад" - возвращается к предыдущему режиму
+        const prevBtn = modal.querySelector('.memory-prev-btn');
+        if (prevBtn && !prevBtn.disabled) {
+            prevBtn.addEventListener('click', () => {
+                modal.remove();
+                this.currentModeIndex--;
+                this.startNextMode();
+            });
+        }
+
         // Игровая логика
         const memoryCards = modal.querySelectorAll('.memory-card');
         const nextBtn = modal.querySelector('.memory-next-btn');
@@ -1771,7 +1893,24 @@ Object.assign(WordTraining.prototype, {
 
         memoryCards.forEach(card => {
             card.addEventListener('click', () => {
-                if (card.classList.contains('flipped') || card.classList.contains('matched') || flippedCards.length >= 2) {
+                // Запрещаем клик только на уже совпавшие карточки
+                if (card.classList.contains('matched')) {
+                    return;
+                }
+
+                // Если карточка уже перевернута, переворачиваем обратно
+                if (card.classList.contains('flipped')) {
+                    card.classList.remove('flipped');
+                    // Удаляем из массива перевернутых карточек
+                    const index = flippedCards.indexOf(card);
+                    if (index > -1) {
+                        flippedCards.splice(index, 1);
+                    }
+                    return;
+                }
+
+                // Если уже 2 карточки перевернуты, не разрешаем переворачивать третью
+                if (flippedCards.length >= 2) {
                     return;
                 }
 
@@ -1805,14 +1944,17 @@ Object.assign(WordTraining.prototype, {
                             }
 
                             if (correctMatches === this.selectedWords.length) {
+                                // Активируем кнопку "Вперед" когда игра завершена
                                 nextBtn.disabled = false;
+                                nextBtn.style.opacity = '1';
+                                nextBtn.style.cursor = 'pointer';
                                 this.totalCorrectAnswers += correctMatches;
                             }
 
                             flippedCards = [];
                         }, 500);
                     } else {
-                        // Нет совпадения
+                        // Нет совпадения - автоматически переворачиваем через 1 секунду
                         setTimeout(() => {
                             card1.classList.remove('flipped');
                             card2.classList.remove('flipped');
@@ -1824,54 +1966,139 @@ Object.assign(WordTraining.prototype, {
         });
 
         nextBtn.addEventListener('click', () => {
-            modal.remove();
-            this.currentModeIndex++;
-            this.startNextMode();
+            if (!nextBtn.disabled) {
+                modal.remove();
+                this.currentModeIndex++;
+                this.startNextMode();
+            }
         });
+    },
+
+    // Добавим метод для возврата к предыдущему режиму
+    startPreviousMode() {
+        if (this.currentModeIndex > 0) {
+            this.currentModeIndex--;
+            this.currentCardIndex = 0;
+            this.isFlipped = false;
+            
+            const prevMode = this.activeModesSequence[this.currentModeIndex];
+            console.log('🎯 Going back to mode:', prevMode, `(${this.currentModeIndex + 1}/${this.activeModesSequence.length})`);
+
+            switch (prevMode) {
+                case 'flashcards':
+                    this.createFlashcardsModal();
+                    break;
+                case 'memory':
+                    this.createMemoryGameModal();
+                    break;
+                case 'translation':
+                    this.createTranslationQuizModal();
+                    break;
+                case 'fillblanks': 
+                    this.createFillBlanksModal();
+                    break;
+                case 'matching':
+                    this.createMatchingModal();
+                    break;
+                case 'spelling': 
+                    this.createSpellingModal();
+                    break;
+            }
+        }
+    },
+
+    // Добавим метод для возврата к предыдущему режиму
+    startPreviousMode() {
+        if (this.currentModeIndex > 0) {
+            this.currentModeIndex--;
+            this.currentCardIndex = 0;
+            this.isFlipped = false;
+            
+            const prevMode = this.activeModesSequence[this.currentModeIndex];
+            console.log('🎯 Going back to mode:', prevMode, `(${this.currentModeIndex + 1}/${this.activeModesSequence.length})`);
+
+            switch (prevMode) {
+                case 'flashcards':
+                    this.createFlashcardsModal();
+                    break;
+                case 'memory':
+                    this.createMemoryGameModal();
+                    break;
+                case 'translation':
+                    this.createTranslationQuizModal();
+                    break;
+                case 'fillblanks': 
+                    this.createFillBlanksModal();
+                    break;
+                case 'matching':
+                    this.createMatchingModal();
+                    break;
+                case 'spelling': 
+                    this.createSpellingModal();
+                    break;
+            }
+        }
     },
 
     // РЕЖИМ: Проверка перевода
     createTranslationQuizModal() {
         let currentIndex = 0;
         let correctAnswers = 0;
-    
+
         const createQuizHTML = (word, index, total) => {
             const randomTranslations = this.getRandomTranslations(word);
             const allTranslations = [...randomTranslations, word.translation]
                 .sort(() => 0.5 - Math.random());
-    
+
             return `
-                <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                        <h2 style="color: var(--card-text-primary); font-size: 24px;">Выберите правильный перевод (${index + 1}/${total})</h2>
-                        <button class="close-quiz" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer;">×</button>
+                <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column; box-sizing: border-box;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; box-sizing: border-box;">
+                        <h2 style="color: var(--card-text-primary); font-size: 24px; margin: 0; box-sizing: border-box;">Выберите правильный перевод (${index + 1}/${total})</h2>
+                        <button class="close-quiz" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer; box-sizing: border-box;">×</button>
                     </div>
 
                     ${this.createProgressIndicator('translation', index + 1, total)}
-    
-                    <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 32px;">
-                        <div style="text-align: center;">
-                            <h3 style="color: var(--card-text-primary); font-size: 36px; margin-bottom: 16px;">${word.text}</h3>
-                            <p style="color: var(--card-text-tertiary); font-size: 20px;">${word.phonetics || ''}</p>
+
+                    <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 32px; box-sizing: border-box;">
+                        <div style="text-align: center; box-sizing: border-box;">
+                            <h3 style="color: var(--card-text-primary); font-size: 36px; margin-bottom: 16px; box-sizing: border-box;">${word.text}</h3>
+                            <p style="color: var(--card-text-tertiary); font-size: 20px; box-sizing: border-box;">${word.phonetics || ''}</p>
                         </div>
-    
-                        <div style="display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 400px;">
+
+                        <div style="display: flex; flex-direction: column; gap: 16px; width: 100%; max-width: 400px; box-sizing: border-box;">
                             ${allTranslations.map(translation => `
                                 <button class="translation-option" data-translation="${translation}" 
-                                    style="padding: 20px; background: var(--card-bg); border: 2px solid var(--card-stroke-secondary); border-radius: 12px; color: var(--card-text-primary); font-size: 18px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);">
+                                    style="padding: 20px; background: var(--card-bg); border: 2px solid var(--card-stroke-secondary); border-radius: 12px; color: var(--card-text-primary); font-size: 18px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); box-sizing: border-box;">
                                     ${translation}
                                 </button>
                             `).join('')}
                         </div>
                     </div>
-    
-                    <div style="margin-top: 32px; margin-bottom: 24px; text-align: center; padding: 0 24px;">
-                        <p style="color: var(--card-text-tertiary); font-size: 16px; margin: 0;">Правильных ответов: ${correctAnswers} из ${index}</p>
+
+                    <!-- Навигационные кнопки по центру -->
+                    <div style="display: flex; justify-content: center; align-items: center; margin-top: auto; padding-top: 20px; box-sizing: border-box;">
+                        <div style="display: flex; gap: 12px; box-sizing: border-box;">
+                            <button class="quiz-prev-btn" ${this.currentModeIndex === 0 ? 'disabled' : ''} 
+                                style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--card-bg); color: var(--card-text-primary); transition: all 0.3s ease; font-size: 16px; ${this.currentModeIndex === 0 ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                                </svg>
+                                Назад
+                            </button>
+                            
+                            <button class="quiz-next-btn" disabled 
+                                style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent-color); color: white; transition: all 0.3s ease; opacity: 0.5; font-size: 16px;">
+                                ${this.currentModeIndex === this.activeModesSequence.length - 1 ? 'Завершить' : 'Вперед'}
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
         };
-    
+
         const modal = document.createElement('div');
         modal.style.cssText = `
             position: fixed;
@@ -1885,23 +2112,55 @@ Object.assign(WordTraining.prototype, {
             justify-content: center;
             z-index: 1002;
         `;
-    
+
         const updateQuiz = () => {
             modal.innerHTML = createQuizHTML(
                 this.selectedWords[currentIndex],
                 currentIndex,
                 this.selectedWords.length
             );
-    
-            // Обработчики событий
+
+            // Добавляем CSS стили для правильных и неправильных ответов
+            const style = document.createElement('style');
+            style.textContent = `
+                .translation-correct {
+                    background: linear-gradient(135deg, #a8e6b7 0%, #c8f7d0 100%) !important;
+                    border: 2px solid #8dd99f !important;
+                    color: #2d5a3d !important;
+                    box-shadow: 0 4px 20px rgba(141, 217, 159, 0.3) !important;
+                }
+                .translation-incorrect {
+                    background: #e74c3c !important;
+                    border: 2px solid #e74c3c !important;
+                    color: white !important;
+                }
+            `;
+            document.head.appendChild(style);
+
+            // Обработчик закрытия
             modal.querySelector('.close-quiz').addEventListener('click', () => {
                 this.totalCorrectAnswers += correctAnswers;
                 modal.remove();
                 this.currentModeIndex++;
                 this.startNextMode();
             });
-    
+
+            // Кнопка "Назад" - возвращается к предыдущему режиму
+            const prevBtn = modal.querySelector('.quiz-prev-btn');
+            if (prevBtn && !prevBtn.disabled) {
+                prevBtn.addEventListener('click', () => {
+                    modal.remove();
+                    this.currentModeIndex--;
+                    this.startNextMode();
+                });
+            }
+
+            // Кнопка "Вперед" - изначально неактивна
+            const nextBtn = modal.querySelector('.quiz-next-btn');
+
+            // Обработчики кликов по вариантам ответов
             const options = modal.querySelectorAll('.translation-option');
+            
             options.forEach(option => {
                 option.addEventListener('mouseover', () => {
                     if (!option.disabled) {
@@ -1924,27 +2183,32 @@ Object.assign(WordTraining.prototype, {
                     
                     const isCorrect = option.dataset.translation === this.selectedWords[currentIndex].translation;
                     
-                    // Отключаем все кнопки
+                    // Отключаем все кнопки и стилизуем их
                     options.forEach(btn => {
                         btn.disabled = true;
                         btn.style.cursor = 'default';
                         btn.style.pointerEvents = 'none';
                         
                         if (btn.dataset.translation === this.selectedWords[currentIndex].translation) {
-                            btn.style.background = 'var(--correct-border)';
-                            btn.style.borderColor = 'var(--correct-border)';
-                            btn.style.color = 'white';
+                            // Добавляем класс для правильного ответа
+                            btn.classList.add('translation-correct');
                         } else if (btn === option && !isCorrect) {
-                            btn.style.background = 'var(--danger)';
-                            btn.style.borderColor = 'var(--danger)';
-                            btn.style.color = 'white';
+                            // Добавляем класс для неправильного ответа
+                            btn.classList.add('translation-incorrect');
                         }
                     });
-    
-                    if (isCorrect) correctAnswers++;
-    
-                    // Ждем 1.5 секунды перед переходом
-                    setTimeout(() => {
+
+                    if (isCorrect) {
+                        correctAnswers++;
+                    }
+
+                    // Активируем кнопку "Вперед"
+                    nextBtn.disabled = false;
+                    nextBtn.style.opacity = '1';
+                    nextBtn.style.cursor = 'pointer';
+
+                    // Обработчик для кнопки "Вперед"
+                    nextBtn.onclick = () => {
                         if (currentIndex < this.selectedWords.length - 1) {
                             currentIndex++;
                             updateQuiz();
@@ -1954,11 +2218,11 @@ Object.assign(WordTraining.prototype, {
                             this.currentModeIndex++;
                             this.startNextMode();
                         }
-                    }, 1500);
+                    };
                 });
             });
         };
-    
+
         updateQuiz();
         document.body.appendChild(modal);
     },
@@ -1967,6 +2231,7 @@ Object.assign(WordTraining.prototype, {
     createFillBlanksModal() {
         let currentIndex = 0;
         let correctAnswers = 0;
+        let answeredQuestions = new Set(); // Отслеживаем отвеченные вопросы
 
         const modal = document.createElement('div');
         modal.style.cssText = `
@@ -2031,37 +2296,61 @@ Object.assign(WordTraining.prototype, {
             const blankSentence = example.replace(wordRegex, '_____');
             
             modal.innerHTML = `
-                <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                        <h2 style="color: var(--card-text-primary); font-size: 24px; margin: 0;">Fill in the Blanks</h2>
-                        <button class="close-fillblanks" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer;">×</button>
+                <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column; box-sizing: border-box;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; box-sizing: border-box;">
+                        <h2 style="color: var(--card-text-primary); font-size: 24px; margin: 0; box-sizing: border-box;">Fill in the Blanks (${currentIndex + 1}/${this.selectedWords.length})</h2>
+                        <button class="close-fillblanks" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer; box-sizing: border-box;">×</button>
                     </div>
 
                     ${this.createProgressIndicator('fillblanks', currentIndex + 1, this.selectedWords.length)}
 
-                    <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;">
-                        <div style="background: white; padding: 32px 24px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); max-width: 600px; width: 100%;">
-                            <p style="color: #2c3e50; font-size: 24px; margin: 0; line-height: 1.5; font-weight: 500;">
+                    <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; box-sizing: border-box;">
+                        <div style="background: white; padding: 32px 24px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); max-width: 600px; width: 100%; box-sizing: border-box;">
+                            <p style="color: #2c3e50; font-size: 24px; margin: 0; line-height: 1.5; font-weight: 500; box-sizing: border-box;">
                                 ${blankSentence}
                             </p>
                         </div>
                         
-                        <div style="color: var(--card-text-secondary); font-size: 16px; margin-bottom: 24px;">
+                        <div style="color: var(--card-text-secondary); font-size: 16px; margin-bottom: 24px; box-sizing: border-box;">
                             <strong>Перевод:</strong> ${word.translation}
                         </div>
                         
-                        <div style="margin-bottom: 24px;">
+                        <div style="margin-bottom: 24px; box-sizing: border-box;">
                             <input type="text" id="answer-input" placeholder="Введите пропущенное слово..." 
                                 style="width: 350px; padding: 12px; border: 2px solid var(--card-stroke); 
                                 border-radius: 8px; font-size: 16px; text-align: center; background: white; 
-                                color: var(--card-text-primary); outline: none; transition: all 0.3s ease;">
+                                color: var(--card-text-primary); outline: none; transition: all 0.3s ease; box-sizing: border-box;"
+                                ${answeredQuestions.has(currentIndex) ? 'disabled' : ''}>
                         </div>
                         
-                        <button class="check-answer" style="background: var(--accent-color); color: white; 
+                        <button class="check-answer" 
+                            style="background: var(--accent-color); color: white; 
                             padding: 12px 32px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; 
-                            transition: all 0.3s ease;">
-                            Проверить
+                            transition: all 0.3s ease; box-sizing: border-box;"
+                            ${answeredQuestions.has(currentIndex) ? 'disabled' : ''}>
+                            ${answeredQuestions.has(currentIndex) ? 'Отвечено' : 'Проверить'}
                         </button>
+                    </div>
+
+                    <!-- Навигационные кнопки по центру -->
+                    <div style="display: flex; justify-content: center; align-items: center; margin-top: auto; padding-top: 20px; box-sizing: border-box;">
+                        <div style="display: flex; gap: 12px; box-sizing: border-box;">
+                            <button class="fillblanks-prev-btn" ${this.currentModeIndex === 0 ? 'disabled' : ''} 
+                                style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--card-bg); color: var(--card-text-primary); transition: all 0.3s ease; font-size: 16px; ${this.currentModeIndex === 0 ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                                </svg>
+                                Назад
+                            </button>
+                            
+                            <button class="fillblanks-next-btn"
+                                style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent-color); color: white; transition: all 0.3s ease; font-size: 16px;">
+                                ${currentIndex < this.selectedWords.length - 1 ? 'Следующий' : (this.currentModeIndex === this.activeModesSequence.length - 1 ? 'Завершить' : 'Вперед')}
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -2073,9 +2362,13 @@ Object.assign(WordTraining.prototype, {
                     border-color: var(--accent-color) !important;
                     box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2) !important;
                 }
-                .check-answer:hover {
+                .check-answer:hover:not(:disabled) {
                     background: var(--text-hover) !important;
                     transform: translateY(-2px) !important;
+                }
+                .check-answer:disabled {
+                    opacity: 0.6 !important;
+                    cursor: not-allowed !important;
                 }
                 .close-fillblanks:hover {
                     color: #e74c3c !important;
@@ -2083,17 +2376,33 @@ Object.assign(WordTraining.prototype, {
             `;
             document.head.appendChild(style);
 
-            // Фокус на поле ввода
-            setTimeout(() => {
+            // Если вопрос уже отвечен, показываем результат
+            if (answeredQuestions.has(currentIndex)) {
                 const input = modal.querySelector('#answer-input');
-                if (input) input.focus();
-            }, 100);
+                const checkBtn = modal.querySelector('.check-answer');
+                
+                input.value = word.text;
+                input.style.borderColor = '#00b894';
+                input.style.backgroundColor = '#d1f2eb';
+                input.style.color = '#00b894';
+                checkBtn.style.background = 'linear-gradient(135deg, #00b894 0%, #00a085 100%)';
+            } else {
+                // Фокус на поле ввода только для новых вопросов
+                setTimeout(() => {
+                    const input = modal.querySelector('#answer-input');
+                    if (input) input.focus();
+                }, 100);
+            }
 
             // Обработчики событий
             const input = modal.querySelector('#answer-input');
             const checkBtn = modal.querySelector('.check-answer');
+            const nextBtn = modal.querySelector('.fillblanks-next-btn');
+            const prevBtn = modal.querySelector('.fillblanks-prev-btn');
 
             const checkAnswer = () => {
+                if (answeredQuestions.has(currentIndex)) return;
+
                 const userAnswer = input.value.trim().toLowerCase();
                 const correctAnswer = word.text.toLowerCase();
                 const isCorrect = userAnswer === correctAnswer;
@@ -2116,30 +2425,44 @@ Object.assign(WordTraining.prototype, {
 
                 checkBtn.disabled = true;
                 input.disabled = true;
-
-                setTimeout(() => {
-                    if (currentIndex < this.selectedWords.length - 1) {
-                        currentIndex++;
-                        updateFillBlanks();
-                    } else {
-                        this.totalCorrectAnswers += correctAnswers;
-                        modal.remove();
-                        this.currentModeIndex++;
-                        this.startNextMode();
-                    }
-                }, 2000);
+                answeredQuestions.add(currentIndex);
             };
 
-            checkBtn.addEventListener('click', checkAnswer);
-            
-            input.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    checkAnswer();
+            if (!answeredQuestions.has(currentIndex)) {
+                checkBtn.addEventListener('click', checkAnswer);
+                
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        checkAnswer();
+                    }
+                });
+            }
+
+            // Кнопка "Назад" - возвращается к предыдущему режиму
+            if (prevBtn && !prevBtn.disabled) {
+                prevBtn.addEventListener('click', () => {
+                    modal.remove();
+                    this.currentModeIndex--;
+                    this.startNextMode();
+                });
+            }
+
+            // Кнопка "Следующий/Вперед/Завершить"
+            nextBtn.addEventListener('click', () => {
+                if (currentIndex < this.selectedWords.length - 1) {
+                    currentIndex++;
+                    updateFillBlanks();
+                } else {
+                    this.totalCorrectAnswers += correctAnswers;
+                    modal.remove();
+                    this.currentModeIndex++;
+                    this.startNextMode();
                 }
             });
 
+            // Закрытие модального окна
             modal.querySelector('.close-fillblanks').addEventListener('click', () => {
-                // НЕ добавляем correctAnswers при закрытии
+                this.totalCorrectAnswers += correctAnswers;
                 modal.remove();
                 this.currentModeIndex++;
                 this.startNextMode();
@@ -2156,6 +2479,7 @@ Object.assign(WordTraining.prototype, {
         let selectedCard = null;
         let canClick = true;
         let correctMatches = 0;
+        let gameCompleted = false;
         
         const shuffleArray = (array) => {
             for (let i = array.length - 1; i > 0; i--) {
@@ -2171,8 +2495,8 @@ Object.assign(WordTraining.prototype, {
                     style="background: var(--card-bg); padding: 16px; border: 2px solid var(--card-stroke-secondary); border-radius: 12px; cursor: pointer; 
                     height: 80px; display: flex; align-items: center; justify-content: center; 
                     color: var(--card-text-primary); font-size: 18px; text-align: center; transition: all 0.3s ease;
-                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                    ${matchedPairs.has(index) ? 'background: var(--correct-border) !important; color: white !important; cursor: default; border-color: var(--correct-border) !important;' : ''}">
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); box-sizing: border-box;
+                    ${matchedPairs.has(index) ? 'background: linear-gradient(135deg, #a8e6b7 0%, #c8f7d0 100%) !important; color: #2d5a3d !important; cursor: default; border: 2px solid #8dd99f !important; box-shadow: 0 4px 20px rgba(141, 217, 159, 0.3) !important;' : ''}">
                     ${text}
                 </div>
             `;
@@ -2203,30 +2527,51 @@ Object.assign(WordTraining.prototype, {
         const translations = shuffleArray([...pairs]);
 
         modal.innerHTML = `
-            <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                    <h2 style="color: var(--card-text-primary); font-size: 24px;">Сопоставьте пары</h2>
-                    <button class="close-matching" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer;">×</button>
+            <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column; box-sizing: border-box;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; box-sizing: border-box;">
+                    <h2 style="color: var(--card-text-primary); font-size: 24px; margin: 0; box-sizing: border-box;">Сопоставьте пары</h2>
+                    <button class="close-matching" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer; box-sizing: border-box;">×</button>
                 </div>
 
                 ${this.createProgressIndicator('matching', 0, pairs.length)}
 
-                <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px;">
-                    <div class="words-column" style="display: grid; gap: 16px; align-content: start;">
+                <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px; box-sizing: border-box;">
+                    <div class="words-column" style="display: grid; gap: 16px; align-content: start; box-sizing: border-box;">
                         ${words.map((pair) => createCardHTML(pair.word, pair.index, true)).join('')}
                     </div>
-                    <div class="translations-column" style="display: grid; gap: 16px; align-content: start;">
+                    <div class="translations-column" style="display: grid; gap: 16px; align-content: start; box-sizing: border-box;">
                         ${translations.map((pair) => createCardHTML(pair.translation, pair.index, false)).join('')}
                     </div>
                 </div>
 
-                <div style="text-align: center; margin-top: 16px;">
-                    <p style="color: var(--card-text-tertiary); font-size: 16px;">Правильных пар: <span id="matches-count">0</span> из ${pairs.length}</p>
+                <!-- Навигационные кнопки по центру -->
+                <div style="display: flex; justify-content: center; align-items: center; margin-top: auto; padding-top: 20px; box-sizing: border-box;">
+                    <div style="display: flex; gap: 12px; box-sizing: border-box;">
+                        <button class="matching-prev-btn" ${this.currentModeIndex === 0 ? 'disabled' : ''} 
+                            style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--card-bg); color: var(--card-text-primary); transition: all 0.3s ease; font-size: 16px; ${this.currentModeIndex === 0 ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M19 12H5M12 19l-7-7 7-7"/>
+                            </svg>
+                            Назад
+                        </button>
+                        
+                        <button class="matching-next-btn" disabled 
+                            style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent-color); color: white; transition: all 0.3s ease; opacity: 0.5; font-size: 16px;">
+                            ${this.currentModeIndex === this.activeModesSequence.length - 1 ? 'Завершить' : 'Вперед'}
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M5 12h14M12 5l7 7-7 7"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
 
         document.body.appendChild(modal);
+
+        // Получаем ссылки на кнопки навигации
+        const nextBtn = modal.querySelector('.matching-next-btn');
+        const prevBtn = modal.querySelector('.matching-prev-btn');
 
         // Обработчики событий
         modal.querySelector('.close-matching').addEventListener('click', () => {
@@ -2235,6 +2580,15 @@ Object.assign(WordTraining.prototype, {
             this.currentModeIndex++;
             this.startNextMode();
         });
+
+        // Кнопка "Назад" - возвращается к предыдущему режиму
+        if (prevBtn && !prevBtn.disabled) {
+            prevBtn.addEventListener('click', () => {
+                modal.remove();
+                this.currentModeIndex--;
+                this.startNextMode();
+            });
+        }
 
         const handleCardClick = (card) => {
             if (!canClick || matchedPairs.has(parseInt(card.dataset.index))) return;
@@ -2253,21 +2607,16 @@ Object.assign(WordTraining.prototype, {
             const secondIndex = parseInt(card.dataset.index);
 
             if (firstIndex === secondIndex) {
-                // Правильная пара
+                // Правильная пара - используем тот же зеленый цвет как в Memory Game
                 correctMatches++;
-                card.style.background = 'var(--correct-border)';
-                card.style.borderColor = 'var(--correct-border)';
-                card.style.color = 'white';
-                selectedCard.style.background = 'var(--correct-border)';
-                selectedCard.style.borderColor = 'var(--correct-border)';
-                selectedCard.style.color = 'white';
+                
+                // Применяем зеленый градиент и стили как в Memory Game
+                const greenStyle = 'background: linear-gradient(135deg, #a8e6b7 0%, #c8f7d0 100%) !important; color: #2d5a3d !important; border: 2px solid #8dd99f !important; box-shadow: 0 4px 20px rgba(141, 217, 159, 0.3) !important;';
+                
+                card.style.cssText += greenStyle;
+                selectedCard.style.cssText += greenStyle;
+                
                 matchedPairs.add(firstIndex);
-
-                // Обновляем счетчик
-                const matchesCount = modal.querySelector('#matches-count');
-                if (matchesCount) {
-                    matchesCount.textContent = correctMatches;
-                }
 
                 // Обновляем прогресс
                 const progressBar = modal.querySelector('[style*="background: var(--accent-color)"]');
@@ -2275,13 +2624,22 @@ Object.assign(WordTraining.prototype, {
                     progressBar.style.width = `${(correctMatches / pairs.length) * 100}%`;
                 }
 
-                if (correctMatches === pairs.length) {
-                    setTimeout(() => {
+                // Проверяем завершение игры
+                if (correctMatches === pairs.length && !gameCompleted) {
+                    gameCompleted = true;
+                    
+                    // Активируем кнопку "Вперед"
+                    nextBtn.disabled = false;
+                    nextBtn.style.opacity = '1';
+                    nextBtn.style.cursor = 'pointer';
+
+                    // Добавляем обработчик для кнопки "Вперед"
+                    nextBtn.onclick = () => {
                         this.totalCorrectAnswers += correctMatches;
                         modal.remove();
                         this.currentModeIndex++;
                         this.startNextMode();
-                    }, 1000);
+                    };
                 }
             } else {
                 // Неправильная пара
@@ -2321,6 +2679,8 @@ Object.assign(WordTraining.prototype, {
     createSpellingModal() {
         let currentIndex = 0;
         let correctAnswers = 0;
+        let answeredQuestions = new Set(); // Отслеживаем отвеченные вопросы
+        let userAnswers = {}; // Сохраняем ответы пользователя
         
         const shuffleWord = (word) => {
             return word.split('')
@@ -2334,44 +2694,68 @@ Object.assign(WordTraining.prototype, {
 
         const createSpellingHTML = (word, index, total) => {
             const shuffledLetters = shuffleWord(word.text);
+            const isAnswered = answeredQuestions.has(index);
+            
             return `
-                <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                        <h2 style="color: var(--card-text-primary); font-size: 24px;">Составьте слово (${index + 1}/${total})</h2>
-                        <button class="close-spelling" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer;">×</button>
+                <div style="background: #f8f9ff; width: 95vw; height: 90vh; border-radius: 12px; padding: 24px; margin: 16px; display: flex; flex-direction: column; box-sizing: border-box;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; box-sizing: border-box;">
+                        <h2 style="color: var(--card-text-primary); font-size: 24px; margin: 0; box-sizing: border-box;">Составьте слово (${index + 1}/${total})</h2>
+                        <button class="close-spelling" style="color: var(--card-text-tertiary); background: none; border: none; font-size: 24px; cursor: pointer; box-sizing: border-box;">×</button>
                     </div>
 
                     ${this.createProgressIndicator('spelling', index + 1, total)}
 
-                    <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 32px;">
-                        <div style="text-align: center;">
-                            <p style="color: var(--card-text-tertiary); font-size: 24px; margin-bottom: 8px;">Перевод:</p>
-                            <h3 style="color: var(--card-text-primary); font-size: 32px;">${word.translation}</h3>
+                    <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 32px; box-sizing: border-box;">
+                        <div style="text-align: center; box-sizing: border-box;">
+                            <p style="color: var(--card-text-tertiary); font-size: 24px; margin-bottom: 8px; box-sizing: border-box;">Перевод:</p>
+                            <h3 style="color: var(--card-text-primary); font-size: 32px; margin: 0; box-sizing: border-box;">${word.translation}</h3>
                         </div>
 
-                        <div class="answer-container" style="min-height: 60px; padding: 16px; background: var(--card-bg-tertiary); border: 2px dashed var(--card-stroke-secondary); border-radius: 8px; width: 100%; max-width: 800px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 16px; transition: all 0.3s ease;">
+                        <div class="answer-container" style="min-height: 60px; padding: 16px; background: var(--card-bg-tertiary); border: 2px dashed var(--card-stroke-secondary); border-radius: 8px; width: 100%; max-width: 800px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 16px; transition: all 0.3s ease; box-sizing: border-box;">
                         </div>
 
-                        <div class="letters-container" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; max-width: 800px;">
+                        <div class="letters-container" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; width: 100%; max-width: 800px; box-sizing: border-box;">
                             ${shuffledLetters.map(({letter, id}) => `
-                                <div class="letter" data-id="${id}" style="width: 50px; height: 50px; background: var(--card-bg-secondary); border: 1px solid var(--card-stroke); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--card-text-primary); font-size: 24px; cursor: pointer; transition: all 0.2s ease;">
+                                <div class="letter" data-id="${id}" style="width: 50px; height: 50px; background: var(--card-bg-secondary); border: 1px solid var(--card-stroke); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--card-text-primary); font-size: 24px; cursor: pointer; transition: all 0.2s ease; box-sizing: border-box; ${isAnswered ? 'pointer-events: none; opacity: 0.6;' : ''}">
                                     ${letter}
                                 </div>
                             `).join('')}
                         </div>
 
-                        <div style="display: flex; gap: 16px;">
-                            <button class="check-btn" disabled style="padding: 12px 32px; background: var(--card-bg-secondary); color: var(--card-text-primary); border: 1px solid var(--card-stroke); border-radius: 8px; font-size: 16px; cursor: pointer; transition: all 0.3s ease; opacity: 0.5;">
+                        <div style="display: flex; gap: 16px; box-sizing: border-box;">
+                            <button class="check-btn" disabled style="padding: 12px 32px; background: var(--card-bg-secondary); color: var(--card-text-primary); border: 1px solid var(--card-stroke); border-radius: 8px; font-size: 16px; cursor: pointer; transition: all 0.3s ease; opacity: 0.5; box-sizing: border-box; ${isAnswered ? 'display: none;' : ''}">
                                 Проверить
                             </button>
-                            <button class="reset-btn" style="padding: 12px 32px; background: var(--card-bg-secondary); color: var(--card-text-primary); border: 1px solid var(--card-stroke); border-radius: 8px; font-size: 16px; cursor: pointer; transition: all 0.3s ease;">
+                            <button class="reset-btn" style="padding: 12px 32px; background: var(--card-bg-secondary); color: var(--card-text-primary); border: 1px solid var(--card-stroke); border-radius: 8px; font-size: 16px; cursor: pointer; transition: all 0.3s ease; box-sizing: border-box; ${isAnswered ? 'display: none;' : ''}">
                                 Сбросить
                             </button>
+                            ${isAnswered ? `
+                                <div style="padding: 12px 32px; background: linear-gradient(135deg, #a8e6b7 0%, #c8f7d0 100%); color: #2d5a3d; border: 1px solid #8dd99f; border-radius: 8px; font-size: 16px; font-weight: 600; box-sizing: border-box;">
+                                    ${userAnswers[index] === word.text.toLowerCase() ? 'Правильно! ✓' : 'Неправильно ✗'}
+                                </div>
+                            ` : ''}
                         </div>
                     </div>
 
-                    <div style="margin-top: 32px; margin-bottom: 24px; text-align: center; padding: 0 24px;">
-                        <p style="color: var(--card-text-tertiary); font-size: 16px; margin: 0;">Правильных ответов: ${correctAnswers} из ${index}</p>
+                    <!-- Навигационные кнопки по центру -->
+                    <div style="display: flex; justify-content: center; align-items: center; margin-top: auto; padding-top: 20px; box-sizing: border-box;">
+                        <div style="display: flex; gap: 12px; box-sizing: border-box;">
+                            <button class="spelling-prev-btn" ${this.currentModeIndex === 0 ? 'disabled' : ''} 
+                                style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--card-bg); color: var(--card-text-primary); transition: all 0.3s ease; font-size: 16px; ${this.currentModeIndex === 0 ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                                </svg>
+                                Назад
+                            </button>
+                            
+                            <button class="spelling-next-btn"
+                                style="display: flex; align-items: center; gap: 8px; justify-content: center; padding: 12px 24px; border-radius: 8px; border: none; cursor: pointer; background: var(--accent-color); color: white; transition: all 0.3s ease; font-size: 16px;">
+                                ${currentIndex < this.selectedWords.length - 1 ? 'Следующий' : (this.currentModeIndex === this.activeModesSequence.length - 1 ? 'Завершить' : 'Вперед')}
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -2395,44 +2779,44 @@ Object.assign(WordTraining.prototype, {
             const answerContainer = modal.querySelector('.answer-container');
             const selectedLetters = answerContainer.querySelectorAll('.letter');
             const userAnswer = Array.from(selectedLetters).map(letter => letter.textContent.trim()).join('');
+            const isCorrect = userAnswer.toLowerCase() === this.selectedWords[currentIndex].text.toLowerCase();
             
-            if (userAnswer.toLowerCase() === this.selectedWords[currentIndex].text.toLowerCase()) {
+            // Сохраняем ответ пользователя
+            userAnswers[currentIndex] = userAnswer.toLowerCase();
+            answeredQuestions.add(currentIndex);
+            
+            if (isCorrect) {
                 correctAnswers++;
-                answerContainer.style.background = 'var(--correct-border)';
-                answerContainer.style.borderColor = 'var(--correct-border)';
-                
-                setTimeout(() => {
-                    if (currentIndex < this.selectedWords.length - 1) {
-                        currentIndex++;
-                        updateSpelling();
-                    } else {
-                        this.totalCorrectAnswers += correctAnswers;
-                        modal.remove();
-                        this.currentModeIndex++;
-                        this.startNextMode();
-                    }
-                }, 1500);
+                answerContainer.style.background = 'linear-gradient(135deg, #a8e6b7 0%, #c8f7d0 100%)';
+                answerContainer.style.borderColor = '#8dd99f';
             } else {
-                answerContainer.style.background = 'var(--danger)';
-                answerContainer.style.borderColor = 'var(--danger)';
+                answerContainer.style.background = '#e74c3c';
+                answerContainer.style.borderColor = '#e74c3c';
                 
+                // Показываем правильный ответ
                 setTimeout(() => {
-                    answerContainer.style.background = 'var(--card-bg-tertiary)';
-                    answerContainer.style.borderColor = 'var(--card-stroke-secondary)';
-                    // Возвращаем все буквы обратно
-                    const lettersContainer = modal.querySelector('.letters-container');
-                    Array.from(answerContainer.querySelectorAll('.letter')).forEach(letter => {
-                        lettersContainer.appendChild(letter);
+                    answerContainer.innerHTML = '';
+                    this.selectedWords[currentIndex].text.split('').forEach(letter => {
+                        const letterDiv = document.createElement('div');
+                        letterDiv.style.cssText = 'width: 50px; height: 50px; background: linear-gradient(135deg, #a8e6b7 0%, #c8f7d0 100%); border: 1px solid #8dd99f; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #2d5a3d; font-size: 24px; font-weight: 600;';
+                        letterDiv.textContent = letter;
+                        answerContainer.appendChild(letterDiv);
                     });
-                    updateCheckButton();
                 }, 1500);
             }
+            
+            // Обновляем интерфейс для показа результата
+            setTimeout(() => {
+                updateSpelling();
+            }, 2500);
         };
 
         const updateCheckButton = () => {
             const answerContainer = modal.querySelector('.answer-container');
             const checkBtn = modal.querySelector('.check-btn');
             const selectedLetters = answerContainer.querySelectorAll('.letter');
+            
+            if (!checkBtn) return; // Если кнопка скрыта для отвеченных вопросов
             
             if (selectedLetters.length === this.selectedWords[currentIndex].text.length) {
                 checkBtn.style.opacity = '1';
@@ -2456,6 +2840,26 @@ Object.assign(WordTraining.prototype, {
                 this.selectedWords.length
             );
 
+            const isAnswered = answeredQuestions.has(currentIndex);
+
+            // Если вопрос уже отвечен, показываем результат
+            if (isAnswered) {
+                const answerContainer = modal.querySelector('.answer-container');
+                const userAnswer = userAnswers[currentIndex];
+                const correctAnswer = this.selectedWords[currentIndex].text.toLowerCase();
+                const isCorrect = userAnswer === correctAnswer;
+                
+                answerContainer.innerHTML = '';
+                const answerToShow = isCorrect ? userAnswer : correctAnswer;
+                
+                answerToShow.split('').forEach(letter => {
+                    const letterDiv = document.createElement('div');
+                    letterDiv.style.cssText = `width: 50px; height: 50px; background: linear-gradient(135deg, #a8e6b7 0%, #c8f7d0 100%); border: 1px solid #8dd99f; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #2d5a3d; font-size: 24px; font-weight: 600; box-sizing: border-box;`;
+                    letterDiv.textContent = letter;
+                    answerContainer.appendChild(letterDiv);
+                });
+            }
+
             // Обработчики событий
             modal.querySelector('.close-spelling').addEventListener('click', () => {
                 this.totalCorrectAnswers += correctAnswers;
@@ -2464,50 +2868,82 @@ Object.assign(WordTraining.prototype, {
                 this.startNextMode();
             });
 
-            // Кнопка сброса
-            modal.querySelector('.reset-btn').addEventListener('click', () => {
-                const lettersContainer = modal.querySelector('.letters-container');
-                const answerContainer = modal.querySelector('.answer-container');
-                
-                Array.from(answerContainer.querySelectorAll('.letter')).forEach(letter => {
-                    lettersContainer.appendChild(letter);
+            // Кнопка "Назад" - возвращается к предыдущему режиму
+            const prevBtn = modal.querySelector('.spelling-prev-btn');
+            if (prevBtn && !prevBtn.disabled) {
+                prevBtn.addEventListener('click', () => {
+                    modal.remove();
+                    this.currentModeIndex--;
+                    this.startNextMode();
                 });
-                
-                updateCheckButton();
+            }
+
+            // Кнопка "Следующий/Вперед/Завершить"
+            const nextBtn = modal.querySelector('.spelling-next-btn');
+            nextBtn.addEventListener('click', () => {
+                if (currentIndex < this.selectedWords.length - 1) {
+                    currentIndex++;
+                    updateSpelling();
+                } else {
+                    this.totalCorrectAnswers += correctAnswers;
+                    modal.remove();
+                    this.currentModeIndex++;
+                    this.startNextMode();
+                }
             });
 
-            // Кнопка проверки
-            modal.querySelector('.check-btn').addEventListener('click', checkAnswer);
-
-            // Перемещение букв
-            const letters = modal.querySelectorAll('.letter');
-            letters.forEach(letter => {
-                letter.addEventListener('click', () => {
-                    const answerContainer = modal.querySelector('.answer-container');
+            // Кнопка сброса (только для неотвеченных вопросов)
+            const resetBtn = modal.querySelector('.reset-btn');
+            if (resetBtn) {
+                resetBtn.addEventListener('click', () => {
                     const lettersContainer = modal.querySelector('.letters-container');
+                    const answerContainer = modal.querySelector('.answer-container');
                     
-                    if (letter.parentElement === answerContainer) {
+                    Array.from(answerContainer.querySelectorAll('.letter')).forEach(letter => {
                         lettersContainer.appendChild(letter);
-                    } else {
-                        answerContainer.appendChild(letter);
-                    }
+                    });
                     
                     updateCheckButton();
                 });
+            }
 
-                // Hover эффекты
-                letter.addEventListener('mouseenter', () => {
-                    letter.style.background = 'var(--card-hover-secondary)';
-                    letter.style.borderColor = 'var(--accent-color)';
-                    letter.style.color = 'var(--accent-color)';
-                });
+            // Кнопка проверки (только для неотвеченных вопросов)
+            const checkBtn = modal.querySelector('.check-btn');
+            if (checkBtn) {
+                checkBtn.addEventListener('click', checkAnswer);
+            }
 
-                letter.addEventListener('mouseleave', () => {
-                    letter.style.background = 'var(--card-bg-secondary)';
-                    letter.style.borderColor = 'var(--card-stroke)';
-                    letter.style.color = 'var(--card-text-primary)';
+            // Перемещение букв (только для неотвеченных вопросов)
+            if (!isAnswered) {
+                const letters = modal.querySelectorAll('.letter');
+                letters.forEach(letter => {
+                    letter.addEventListener('click', () => {
+                        const answerContainer = modal.querySelector('.answer-container');
+                        const lettersContainer = modal.querySelector('.letters-container');
+                        
+                        if (letter.parentElement === answerContainer) {
+                            lettersContainer.appendChild(letter);
+                        } else {
+                            answerContainer.appendChild(letter);
+                        }
+                        
+                        updateCheckButton();
+                    });
+
+                    // Hover эффекты
+                    letter.addEventListener('mouseenter', () => {
+                        letter.style.background = 'var(--card-hover-secondary)';
+                        letter.style.borderColor = 'var(--accent-color)';
+                        letter.style.color = 'var(--accent-color)';
+                    });
+
+                    letter.addEventListener('mouseleave', () => {
+                        letter.style.background = 'var(--card-bg-secondary)';
+                        letter.style.borderColor = 'var(--card-stroke)';
+                        letter.style.color = 'var(--card-text-primary)';
+                    });
                 });
-            });
+            }
         };
         
         updateSpelling();

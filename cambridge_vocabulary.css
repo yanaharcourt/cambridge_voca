@@ -212,19 +212,25 @@ body {
 .study-button {
     background-color: var(--card-bg-secondary);
     color: var(--body-1);
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: 0.5rem;
+    padding: 0 1.5rem; 
+    border: 1px solid var(--card-stroke); 
+    border-radius: 8px; 
     font-family: 'Poppins', sans-serif;
-    font-size: 14px;
+    font-size: 16px; 
     font-weight: 500;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: all 0.2s; 
     white-space: nowrap;
+    height: 47px; 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 20px; 
 }
 
 .study-button:hover {
     background-color: var(--card-hover-secondary);
+    border-color: var(--card-stroke-secondary); 
 }
 
 .updateWordsButton {
@@ -320,7 +326,7 @@ body {
 .search-input,
 .filter-select,
 .view-button {
-    height: 40px;
+    height: 47px;
     padding: 0 1.25rem;
     appearance: none;
     background: var(--card-bg);
@@ -328,7 +334,7 @@ body {
     border: 1px solid var(--card-stroke);
     border-radius: 8px;
     font-family: 'Poppins', sans-serif;
-    font-size: 0.875rem;
+    font-size: 16px;
     transition: all 0.2s;
     margin-top: 20px;
 }
@@ -376,7 +382,7 @@ body {
     width: 100%;
     padding: 0.75rem 1.25rem; 
     margin-top: 20px !important; 
-    height: 40px; 
+    height: 47px; 
     box-sizing: border-box; 
 }
 
