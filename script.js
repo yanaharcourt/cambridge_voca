@@ -236,24 +236,73 @@ class CambridgeVocabulary {
         // Добавляем чекбоксы к словам если их нет
         this.addCheckboxesToWords();
         
-        // Обработчик для "Выбрать все"
+        // Обработчик для "Выбрать все" 
         const selectAllCheckbox = document.querySelector('.select-all-checkbox');
         if (selectAllCheckbox) {
             selectAllCheckbox.addEventListener('change', () => {
+                console.log('🔘 Select All checkbox changed:', selectAllCheckbox.checked);
+                
                 const wordCheckboxes = document.querySelectorAll('.word-checkbox:not(.select-all-checkbox)');
                 const visibleCheckboxes = Array.from(wordCheckboxes).filter(cb => {
                     const card = cb.closest('.word-card');
                     return card && card.style.display !== 'none';
                 });
                 
-                visibleCheckboxes.forEach(checkbox => {
-                    checkbox.checked = selectAllCheckbox.checked;
-                    this.updateWordSelection(checkbox);
-                });
+                console.log(`📋 Found ${visibleCheckboxes.length} visible word checkboxes`);
+                
+                // Очищаем selectedWords перед массовым выбором/снятием
+                if (selectAllCheckbox.checked) {
+                    // При выборе всех - добавляем только видимые слова
+                    visibleCheckboxes.forEach(checkbox => {
+                        checkbox.checked = true;
+                        const wordText = checkbox.dataset.word;
+                        if (wordText) {
+                            this.selectedWords.add(wordText);
+                        }
+                    });
+                } else {
+                    // При снятии всех - убираем только видимые слова
+                    visibleCheckboxes.forEach(checkbox => {
+                        checkbox.checked = false;
+                        const wordText = checkbox.dataset.word;
+                        if (wordText) {
+                            this.selectedWords.delete(wordText);
+                        }
+                    });
+                }
+                
+                console.log(`✅ Selected words count: ${this.selectedWords.size}`);
                 
                 this.updateStudyButton();
                 this.updateBatchActions();
+                this.updateAllCategoryCheckboxes();
             });
+        } else {
+            console.warn('⚠️ Select All checkbox not found');
+        }
+    }
+
+    updateSelectAllCheckbox() {
+        const selectAllCheckbox = document.querySelector('.select-all-checkbox');
+        if (!selectAllCheckbox) return;
+        
+        const wordCheckboxes = document.querySelectorAll('.word-checkbox:not(.select-all-checkbox)');
+        const visibleCheckboxes = Array.from(wordCheckboxes).filter(cb => {
+            const card = cb.closest('.word-card');
+            return card && card.style.display !== 'none';
+        });
+        
+        const checkedVisibleCheckboxes = visibleCheckboxes.filter(cb => cb.checked);
+        
+        if (checkedVisibleCheckboxes.length === 0) {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = false;
+        } else if (checkedVisibleCheckboxes.length === visibleCheckboxes.length) {
+            selectAllCheckbox.checked = true;
+            selectAllCheckbox.indeterminate = false;
+        } else {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = true;
         }
     }
 
@@ -289,6 +338,9 @@ class CambridgeVocabulary {
         } else {
             this.selectedWords.delete(word);
         }
+        
+        // Обновляем состояние чекбокса "Выбрать все"
+        this.updateSelectAllCheckbox();
     }
 
     // Настройка кнопки "Учить слова"
@@ -327,11 +379,11 @@ class CambridgeVocabulary {
         const selectedCount = this.selectedWords.size;
         
         if (selectedCount > 0) {
-            studyButton.classList.add('active');
             studyButton.textContent = `Учить слова (${selectedCount})`;
+            studyButton.classList.add('active');
         } else {
-            studyButton.classList.remove('active');
             studyButton.textContent = 'Учить слова';
+            studyButton.classList.remove('active');
         }
     }
 
@@ -761,7 +813,6 @@ if (filterSelect) {
         // Обновляем UI
         this.updateStudyButton();
         this.updateBatchActions();
-        this.updateSelectAllCheckbox();
         this.updateAllCategoryCheckboxes();
     }
 
